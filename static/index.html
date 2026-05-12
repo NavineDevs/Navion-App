@@ -269,6 +269,16 @@
         if (nvIsOffline()) {
           return nvOpenOfflineError(displayUrl || rawSrc);
         }
+        var authTarget = displayUrl || nvDecodeProxyUrl(rawSrc) || rawSrc;
+        if (nvShouldBreakOutAuth(authTarget)) {
+          try {
+            var authWin = window.open(authTarget, "_blank", "noopener,noreferrer");
+            if (!authWin) window.location.href = authTarget;
+          } catch (e0) {
+            try { window.location.href = authTarget; } catch (e1) {}
+          }
+          return true;
+        }
         var proxied = nvNormalizeFrameSrc(rawSrc, displayUrl);
         if (!proxied || proxied.indexOf("/nv/") !== 0) return false;
         var existing = null;
@@ -403,6 +413,7 @@
           var parsed = new URL(url, window.location.origin);
           var host = parsed.hostname.toLowerCase();
           var path = (parsed.pathname || "").toLowerCase();
+          if (host === "accounts.youtube.com" || host.endsWith(".accounts.youtube.com")) return true;
           var googleHost = host === "accounts.google.com" || host.endsWith(".google.com");
           var youtubeHost = host === "youtube.com" || host === "www.youtube.com" || host.endsWith(".youtube.com");
           return (
