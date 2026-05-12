@@ -74,6 +74,13 @@ function resolveTargetFromNavionPath(pathname, search) {
   return target.href;
 }
 
+function resolveRelativeTargetFromNavionPath(pathname, search, baseTarget) {
+  if (!pathname || !pathname.startsWith("/nv/") || !baseTarget) return null;
+  const rawPath = pathname.slice("/nv/".length);
+  if (!rawPath) return null;
+  return new URL(rawPath + (search || ""), baseTarget).href;
+}
+
 function serveFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const mime = MIMES[ext] || "application/octet-stream";
@@ -149,7 +156,28 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/nav/error") return serveFile(res, path.join(APP_STATIC, "nav.error.html"));
 
   if (url.pathname.startsWith("/nv/")) {
-    const target = resolveTargetFromNavionPath(url.pathname, url.search);
+    let baseTarget = null;
+    const referer = req.headers.referer || "";
+    if (referer) {
+      try {
+        const refUrl = new URL(referer);
+        if (refUrl.origin === `http://${req.headers.host}`) baseTarget = resolveBaseFromPath(refUrl.pathname);
+      } catch {}
+    }
+    if (!baseTarget) {
+      try {
+        const cookies = parseCookies(req.headers.cookie || "");
+        if (cookies.nv_base) {
+          const decodedBase = decode(cookies.nv_base);
+          if (/^https?:\/\//i.test(decodedBase)) baseTarget = decodedBase;
+        }
+      } catch {}
+    }
+    let target = null;
+    try { target = resolveTargetFromNavionPath(url.pathname, url.search); } catch {}
+    if (!target) {
+      try { target = resolveRelativeTargetFromNavionPath(url.pathname, url.search, baseTarget); } catch {}
+    }
     if (!target) {
       res.writeHead(302, { Location: "/" });
       res.end();

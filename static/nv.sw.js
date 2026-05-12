@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.4";
+const CACHE_NAME = "navion-runtime-v4.2.5";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -65,7 +65,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(handleRequest(event.request));
+  event.respondWith(handleRequest(event));
 });
 
 async function handleLocalRequest(request, url) {
@@ -178,6 +178,18 @@ function resolveTargetFromNavionUrl(url) {
     if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
     if (url.search) target.search = url.search;
     return target.href;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveRelativeNavionTarget(event, url) {
+  const baseUrl = await resolveBaseUrl(event);
+  if (!baseUrl) return null;
+  try {
+    const rawPath = url.pathname.slice(NAVION_PREFIX.length);
+    if (!rawPath) return null;
+    return new URL(rawPath + url.search + url.hash, baseUrl).href;
   } catch {
     return null;
   }
@@ -357,14 +369,16 @@ function offlineResponse(request, message, status) {
   return errorResponse("Connection Failed", message || "Failed to fetch", status || 502);
 }
 
-async function handleRequest(request) {
+async function handleRequest(event) {
+  const request = event.request;
   if (navigator.onLine === false) {
     const empty = emptyAssetResponse(request);
     if (empty) return empty;
     return offlineResponse(request, "Browser offline", 502);
   }
   const url = new URL(request.url);
-  const targetUrl = resolveTargetFromNavionUrl(url);
+  let targetUrl = resolveTargetFromNavionUrl(url);
+  if (!targetUrl) targetUrl = await resolveRelativeNavionTarget(event, url);
   if (!targetUrl) {
     return errorResponse("Missing URL", "No URL was provided to proxy.", 400);
   }
