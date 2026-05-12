@@ -8,6 +8,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+set "REMOTE_URL=https://github.com/NavineDevs/Navion-App.git"
+git remote get-url origin >nul 2>nul
+if errorlevel 1 (
+  git remote add origin %REMOTE_URL%
+) else (
+  git remote set-url origin %REMOTE_URL%
+)
+
 for /f "delims=" %%I in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "BRANCH=%%I"
 if not defined BRANCH set "BRANCH=main"
 
