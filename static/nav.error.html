@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Navion Error</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #d7defe; }
+    .nv-wrap { min-height: 100%; display: grid; place-items: center; padding: 20px; }
+    .nv-card { width: min(760px, 100%); background: #1a1f36; border: 1px solid #2b3358; border-radius: 14px; padding: 20px; }
+    .nv-brand { font-weight: 700; color: #b8c4ff; letter-spacing: 1px; margin-bottom: 10px; }
+    .nv-title { margin: 0 0 8px; font-size: 28px; }
+    .nv-text { margin: 0; color: #c5cffb; line-height: 1.55; }
+    .nv-actions { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .nv-btn { text-decoration: none; border: 1px solid #5664aa; background: #4b5cb8; color: #fff; border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+    .nv-btn-alt { background: #222a49; border-color: #3d4778; color: #d7defe; }
+    .nv-meta { margin-top: 14px; font-size: 13px; color: #b8c4ff; line-height: 1.6; }
+    .nv-meta a { color: #9db0ff; }
+    .nv-status { margin-top: 10px; font-size: 13px; color: #c5cffb; }
+    .nv-status strong { color: #b8c4ff; }
+  </style>
+</head>
+<body>
+  <div class="nv-wrap">
+    <div class="nv-card">
+      <div class="nv-brand">Navion</div>
+      <h1 class="nv-title">Navion Request Error</h1>
+      <p class="nv-text" id="nvErrorText">Proxy navigation failed. Use the actions below to retry the proxied page or return to home.</p>
+      <code class="nv-status" id="nvErrorCode"><strong>Code:</strong> NAVION_ROUTE_ERROR</code>
+      <div class="nv-actions">
+        <a class="nv-btn" id="nvRetry" href="/nav/home">Retry proxied page</a>
+        <button class="nv-btn nv-btn-alt" id="nvRegisterSw" type="button">Register Service Worker</button>
+        <a class="nv-btn nv-btn-alt" href="/nav/home">Go to Navion Home</a>
+        <a class="nv-btn nv-btn-alt" href="/">Back to Shell</a>
+      </div>
+      <div class="nv-status" id="nvStatus"><strong>Status:</strong> Checking core availability...</div>
+      <div class="nv-meta">
+        Company: <strong>Navine</strong><br>
+        Lead Dev: <strong>HitBoyXx23</strong><br>
+        Core Repo: <a href="https://github.com/NavineDevs/Navion" target="_blank" rel="noopener noreferrer">github.com/NavineDevs/Navion</a><br>
+        App Repo: <a href="https://github.com/NavineDevs/Navion-App" target="_blank" rel="noopener noreferrer">github.com/NavineDevs/Navion-App</a>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      function getParams() {
+        try { return new URLSearchParams(window.location.search || ""); } catch (e) { return new URLSearchParams(); }
+      }
+
+      function decodeToken(token) {
+        try {
+          if (!token) return "";
+          var p = token + "=".repeat((4 - (token.length % 4)) % 4);
+          return decodeURIComponent(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
+        } catch (e) {
+          return "";
+        }
+      }
+
+      function getRetryTarget() {
+        var params = getParams();
+        try {
+          var encoded = params.get("u");
+          if (encoded) return "/nv/" + encoded;
+        } catch (e) {}
+        try {
+          var ref = document.referrer || "";
+          if (ref) {
+            var parsed = new URL(ref, window.location.origin);
+            if (parsed.origin === window.location.origin && parsed.pathname.indexOf("/nv/") === 0) {
+              return parsed.pathname + parsed.search + parsed.hash;
+            }
+          }
+        } catch (e2) {}
+        return "/nav/home";
+      }
+
+      function setCoreStatus(text) {
+        var el = document.getElementById("nvStatus");
+        if (!el) return;
+        el.innerHTML = "<strong>Status:</strong> " + text;
+      }
+
+      function setErrorInfo() {
+        var params = getParams();
+        var code = params.get("c") || "NAVION_ROUTE_ERROR";
+        var message = params.get("m") || "Proxy navigation failed.";
+        var encoded = params.get("u") || "";
+        var decodedUrl = decodeToken(encoded);
+        var textEl = document.getElementById("nvErrorText");
+        var codeEl = document.getElementById("nvErrorCode");
+        if (textEl) {
+          var extra = decodedUrl ? " Target: " + decodedUrl : "";
+          textEl.textContent = message + extra;
+        }
+        if (codeEl) codeEl.innerHTML = "<strong>Code:</strong> " + code;
+      }
+
+      var retryHref = getRetryTarget();
+      var retryBtn = document.getElementById("nvRetry");
+      if (retryBtn) {
+        retryBtn.href = retryHref;
+        retryBtn.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          window.location.href = retryHref;
+        });
+      }
+      var swBtn = document.getElementById("nvRegisterSw");
+      if (swBtn) {
+        swBtn.addEventListener("click", function () {
+          if (!("serviceWorker" in navigator)) {
+            setCoreStatus("Service workers are not supported in this browser.");
+            return;
+          }
+          navigator.serviceWorker.register("/nv.sw.js", { scope: "/" })
+            .then(function () { setCoreStatus("Service worker registered. Retry now."); })
+            .catch(function (err) { setCoreStatus("Service worker registration failed: " + (err && err.message ? err.message : "unknown")); });
+        });
+      }
+
+      setErrorInfo();
+      if (navigator && navigator.onLine === false) {
+        setCoreStatus("Browser offline. Reconnect, then retry.");
+      } else {
+        fetch("/api/navion-status", { cache: "no-store" })
+          .then(function (res) { return res.ok ? res.json() : Promise.reject(new Error("status")); })
+          .then(function () { setCoreStatus("Core is online. Retry should work."); })
+          .catch(function () { setCoreStatus("Core is unreachable. Check Navion core/app processes, then retry."); });
+      }
+    })();
+  </script>
+</body>
+</html>

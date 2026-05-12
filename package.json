@@ -1,0 +1,16 @@
+{
+  "name": "navion-app",
+  "version": "1.0.0",
+  "description": "Navion App",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "Navine",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {}
+}

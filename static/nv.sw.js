@@ -1,0 +1,342 @@
+const PROXY_ENDPOINT = "/api/fetch";
+const NAVION_PREFIX = "/nv/";
+const CACHE_NAME = "navion-runtime-v4.2.2";
+const RUNTIME_ASSETS = [
+  "/nv.sw.js",
+  "/nv.client.js",
+  "/nv.register.js",
+  "/nav/home",
+  "/nav/error",
+];
+const PASSTHROUGH = new Set([
+  "/nv.sw.js",
+  "/nv.client.js",
+  "/nv.register.js",
+  "/api/fetch",
+  "/generate_204",
+  "/nav/home",
+  "/nav/error",
+]);
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(RUNTIME_ASSETS))
+      .catch(() => null)
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((key) => key === CACHE_NAME ? null : caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (url.origin === self.location.origin && url.pathname === "/api/navion-status" && navigator.onLine === false) {
+    event.respondWith(new Response(JSON.stringify({
+      name: "Navion-App",
+      layer: "app-shell",
+      status: "offline",
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+    }));
+    return;
+  }
+
+  if (url.origin !== self.location.origin) {
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      event.respondWith(handleCrossOriginRequest(event.request, url));
+    }
+    return;
+  }
+  if (PASSTHROUGH.has(url.pathname)) {
+    event.respondWith(handleLocalRequest(event.request, url));
+    return;
+  }
+
+  if (!url.pathname.startsWith(NAVION_PREFIX)) {
+    event.respondWith(handleNonNavionRequest(event, url));
+    return;
+  }
+
+  event.respondWith(handleRequest(event.request));
+});
+
+async function handleLocalRequest(request, url) {
+  if (request.method !== "GET" || !RUNTIME_ASSETS.includes(url.pathname)) {
+    return safeFetch(request);
+  }
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(url.pathname);
+  if (cached) return cached;
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) await cache.put(url.pathname, response.clone());
+    return response;
+  } catch (err) {
+    const fallback = await cache.match(url.pathname);
+    if (fallback) return fallback;
+    const empty = emptyAssetResponse(request);
+    if (empty) return empty;
+    return offlineResponse(request, err && err.message ? err.message : "Failed to fetch", 502);
+  }
+}
+
+async function handleCrossOriginRequest(request, requestUrl) {
+  if (
+    requestUrl.pathname === "/generate_204" &&
+    (requestUrl.hostname === "i.ytimg.com" || requestUrl.hostname.endsWith(".ytimg.com"))
+  ) {
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+  const encoded = swEncode(requestUrl.href);
+  if (!encoded) return errorResponse("Proxy Encode Failed", "Unable to encode upstream URL.", 502);
+  try {
+    return await proxyWithEncoded(request, encoded);
+  } catch (err) {
+    const empty = emptyAssetResponse(request);
+    if (empty) return empty;
+    return errorResponse("Proxy Fetch Failed", err && err.message ? err.message : "Cross-origin proxy request failed.", 502);
+  }
+}
+
+function swEncode(url) {
+  try {
+    return btoa(encodeURIComponent(url))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  } catch {
+    return null;
+  }
+}
+
+function swDecode(encoded) {
+  try {
+    const padded = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
+    return decodeURIComponent(atob(padded.replace(/-/g, "+").replace(/_/g, "/")));
+  } catch {
+    return null;
+  }
+}
+
+function decodeNavionPath(pathname) {
+  if (!pathname.startsWith(NAVION_PREFIX)) return null;
+  const rawPath = pathname.slice(NAVION_PREFIX.length);
+  if (!rawPath) return null;
+  const decodedPath = swDecode(rawPath);
+  if (decodedPath) return decodedPath;
+  try {
+    return decodeURIComponent(rawPath);
+  } catch {
+    return null;
+  }
+}
+
+function parseCookieHeader(header) {
+  const out = {};
+  if (!header) return out;
+  const parts = String(header).split(";");
+  for (let i = 0; i < parts.length; i++) {
+    const item = parts[i].trim();
+    if (!item) continue;
+    const eq = item.indexOf("=");
+    if (eq === -1) continue;
+    const key = item.slice(0, eq).trim();
+    const value = item.slice(eq + 1).trim();
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+async function resolveBaseUrl(event) {
+  if (event.request.referrer) {
+    try {
+      const ref = new URL(event.request.referrer);
+      if (ref.origin === self.location.origin) {
+        const fromReferrer = decodeNavionPath(ref.pathname);
+        if (fromReferrer) return fromReferrer;
+      }
+    } catch {}
+  }
+
+  if (event.clientId) {
+    try {
+      const client = await self.clients.get(event.clientId);
+      if (client && client.url) {
+        const cu = new URL(client.url);
+        if (cu.origin === self.location.origin) {
+          const fromClient = decodeNavionPath(cu.pathname);
+          if (fromClient) return fromClient;
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    const cookies = parseCookieHeader(event.request.headers.get("cookie") || "");
+    if (cookies.nv_base) {
+      const decodedBase = swDecode(cookies.nv_base);
+      if (decodedBase && /^https?:\/\//i.test(decodedBase)) return decodedBase;
+    }
+    if (cookies.nv_origin) {
+      const decodedOrigin = swDecode(cookies.nv_origin);
+      if (decodedOrigin && /^https?:\/\//i.test(decodedOrigin)) return decodedOrigin + "/";
+    }
+  } catch {}
+
+  return null;
+}
+
+async function proxyWithEncoded(request, encoded) {
+  const apiUrl = new URL(PROXY_ENDPOINT, self.location.origin);
+  apiUrl.searchParams.set("url", encoded);
+
+  const forwardHeaders = {};
+  for (const [key, value] of request.headers) {
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "origin") continue;
+    forwardHeaders[key] = value;
+  }
+
+  return fetch(apiUrl.href, {
+    method: request.method,
+    headers: forwardHeaders,
+    body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.blob(),
+  });
+}
+
+async function safeFetch(request) {
+  try {
+    return await fetch(request);
+  } catch (err) {
+    return offlineResponse(request, err && err.message ? err.message : "Failed to fetch", 502);
+  }
+}
+
+async function handleNonNavionRequest(event, requestUrl) {
+  if (PASSTHROUGH.has(requestUrl.pathname)) {
+    return safeFetch(event.request);
+  }
+
+  const baseUrl = await resolveBaseUrl(event);
+  if (
+    (requestUrl.pathname === "/" || requestUrl.pathname === "/index.html") &&
+    !baseUrl
+  ) {
+    return safeFetch(event.request);
+  }
+  if (!baseUrl) return safeFetch(event.request);
+
+  try {
+    const targetUrl = new URL(
+      requestUrl.pathname + requestUrl.search + requestUrl.hash,
+      baseUrl
+    ).href;
+    const encoded = swEncode(targetUrl);
+    if (!encoded) return errorResponse("Proxy Encode Failed", "Unable to encode target URL.", 502);
+
+    if (event.request.mode === "navigate") {
+      return Response.redirect(NAVION_PREFIX + encoded, 302);
+    }
+    return await proxyWithEncoded(event.request, encoded);
+  } catch (err) {
+    return errorResponse("Proxy Fetch Failed", err && err.message ? err.message : "Failed to proxy non-prefixed request.", 502);
+  }
+}
+
+function errorResponse(title, message, status) {
+  return new Response(`${title}: ${message}`, {
+    status,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+function emptyAssetResponse(request) {
+  const dest = String((request && request.destination) || "").toLowerCase();
+  if (dest === "script") {
+    return new Response("", {
+      status: 200,
+      headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+  if (dest === "style") {
+    return new Response("", {
+      status: 200,
+      headers: { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+  if (dest === "font") {
+    return new Response(new ArrayBuffer(0), {
+      status: 200,
+      headers: { "Content-Type": "font/woff2", "Cache-Control": "no-store" },
+    });
+  }
+  if (dest === "image") {
+    return new Response(new ArrayBuffer(0), {
+      status: 200,
+      headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
+    });
+  }
+  return null;
+}
+
+function offlineResponse(request, message, status) {
+  try {
+    const accept = String((request && request.headers && request.headers.get("accept")) || "").toLowerCase();
+    if (
+      request &&
+      (request.mode === "navigate" || request.destination === "document" || accept.includes("text/html"))
+    ) {
+      let next = "/nav/error";
+      try {
+        const reqUrl = new URL(request.url);
+        if (reqUrl.pathname.startsWith(NAVION_PREFIX)) {
+          const encoded = reqUrl.pathname.slice(NAVION_PREFIX.length).split("?")[0].split("#")[0];
+          if (encoded) next = "/nav/error?u=" + encodeURIComponent(encoded);
+        }
+      } catch {}
+      return Response.redirect(next, 302);
+    }
+  } catch {}
+  return errorResponse("Connection Failed", message || "Failed to fetch", status || 502);
+}
+
+async function handleRequest(request) {
+  const url = new URL(request.url);
+  let raw = url.pathname.slice(NAVION_PREFIX.length);
+
+  if (!raw) {
+    return errorResponse("Missing URL", "No URL was provided to proxy.", 400);
+  }
+
+  try { raw = decodeURIComponent(raw); } catch {}
+
+  let encoded;
+  if (/^https?:\/\//i.test(raw)) {
+    encoded = swEncode(raw);
+  } else {
+    encoded = raw;
+  }
+
+  if (!encoded) {
+    return errorResponse("Invalid URL", "The URL could not be encoded.", 400);
+  }
+
+  try {
+    const response = await proxyWithEncoded(request, encoded);
+    return response;
+  } catch (err) {
+    const empty = emptyAssetResponse(request);
+    if (empty) return empty;
+    return offlineResponse(request, err && err.message ? err.message : "Failed to fetch", 502);
+  }
+}
+

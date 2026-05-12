@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Navion Browser</title>
+  <script src="/nv.register.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
+    .nv-shell { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
+    .nv-topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background: #1a1f36;
+      border-bottom: 1px solid #2b3358;
+    }
+    .nv-brand { font-weight: 700; letter-spacing: 1px; color: #b8c4ff; padding: 0 8px; }
+    .nv-btn {
+      border: 1px solid #3d4778;
+      background: #222a49;
+      color: #d7defe;
+      border-radius: 8px;
+      min-width: 34px;
+      height: 34px;
+      cursor: pointer;
+    }
+    .nv-btn:hover { background: #2b3560; }
+    .nv-form { display: flex; flex: 1; gap: 8px; }
+    .nv-input {
+      flex: 1;
+      height: 34px;
+      border: 1px solid #3d4778;
+      border-radius: 8px;
+      background: #11172e;
+      color: #fff;
+      padding: 0 10px;
+      outline: none;
+    }
+    .nv-input:focus { border-color: #7a8be0; }
+    .nv-go {
+      border: 1px solid #5664aa;
+      background: #4b5cb8;
+      color: #fff;
+      border-radius: 8px;
+      padding: 0 14px;
+      height: 34px;
+      cursor: pointer;
+    }
+    .nv-go:hover { background: #5a6bc8; }
+    .nv-tabs {
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+      padding: 0 10px 10px;
+      background: #1a1f36;
+      border-bottom: 1px solid #2b3358;
+      overflow-x: auto;
+    }
+    .nv-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #3d4778;
+      background: #222a49;
+      color: #d7defe;
+      border-radius: 999px;
+      padding: 0 12px;
+      height: 30px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .nv-tab-active { background: #4b5cb8; border-color: #6f81e6; }
+    .nv-tab-close {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+    }
+    .nv-tab-new {
+      border: 1px solid #3d4778;
+      background: #11172e;
+      color: #d7defe;
+      border-radius: 999px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .nv-tab-new:hover, .nv-tab:hover { background: #2b3560; }
+    .nv-view { width: 100%; height: 100%; min-height: 0; border: 0; background: #fff; display: block; }
+  </style>
+</head>
+<body>
+  <div class="nv-shell">
+    <div class="nv-topbar">
+      <div class="nv-brand">Navion</div>
+      <button class="nv-btn" id="nvBack" type="button">&#8592;</button>
+      <button class="nv-btn" id="nvForward" type="button">&#8594;</button>
+      <button class="nv-btn" id="nvReload" type="button">&#10227;</button>
+      <form id="nvForm" class="nv-form">
+        <input id="nvUrl" class="nv-input" type="text" placeholder="Enter URL or search (!g or !d)" autocomplete="off" list="nvSuggestions">
+        <datalist id="nvSuggestions"></datalist>
+        <button class="nv-go" type="submit">Go</button>
+      </form>
+    </div>
+    <div class="nv-tabs" id="nvTabs"></div>
+    <iframe
+      id="nvFrame"
+      class="nv-view"
+      allow="clipboard-read; clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture"
+    ></iframe>
+  </div>
+  <script>
+    !function () {
+      function nvEncode(u) {
+        try { return btoa(encodeURIComponent(u)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, ""); }
+        catch (e) { return null; }
+      }
+      function nvDecode(e) {
+        try {
+          var p = e + "=".repeat((4 - (e.length % 4)) % 4);
+          return decodeURIComponent(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
+        } catch (x) {
+          return "";
+        }
+      }
+      function nvDecodeProxyUrl(rawHref) {
+        if (!rawHref) return "";
+        try {
+          var parsed = new URL(rawHref, window.location.origin);
+          if (parsed.origin !== window.location.origin) return "";
+          if (parsed.pathname.indexOf("/nv/") !== 0) return "";
+          var encoded = parsed.pathname.slice(4).split("?")[0].split("#")[0];
+          var decoded = nvDecode(encoded);
+          return /^https?:\/\//i.test(decoded) ? decoded : "";
+        } catch (e) {
+          return "";
+        }
+      }
+      function nvNormalize(s) {
+        s = s.trim();
+        if (!s) return null;
+        var lower = s.toLowerCase();
+        if (lower === "nav://home") return "nav://home";
+        if (lower === "nav://error" || lower === "nav://error.html") return "nav://error.html";
+        if (/^!g\s+/.test(lower) || /^g\s+/.test(lower)) {
+          var gQuery = s.replace(/^(!g|g)\s+/i, "").trim();
+          if (!gQuery) return null;
+          return "https://www.google.com/search?q=" + encodeURIComponent(gQuery);
+        }
+        if (/^!d\s+/.test(lower) || /^d\s+/.test(lower)) {
+          var dQuery = s.replace(/^(!d|d)\s+/i, "").trim();
+          if (!dQuery) return null;
+          return "https://duckduckgo.com/?q=" + encodeURIComponent(dQuery);
+        }
+        if (/^https?:\/\//i.test(s)) {
+          try { new URL(s); return s; } catch (e) {}
+          return null;
+        }
+        if (/\.|^localhost(:\d+)?$/.test(s)) {
+          try { new URL("https://" + s); return "https://" + s; } catch (e) {}
+        }
+        return "https://duckduckgo.com/?q=" + encodeURIComponent(s);
+      }
+      function nvToProxy(url) {
+        if (url === "nav://home") return "/nav/home";
+        if (url === "nav://error.html") return "/nav/error";
+        var c = nvEncode(url);
+        return c ? "/nv/" + c : null;
+      }
+      function nvDisplayLabel(url) {
+        if (url === "nav://home") return "home";
+        if (url === "nav://error.html") return "error";
+        try {
+          var u = new URL(url);
+          if (u.hostname) return u.hostname.replace(/^www\./i, "");
+          return "Tab";
+        } catch (e) {
+          return "Tab";
+        }
+      }
+      function nvOpen(input, forceTab) {
+        var n = nvNormalize(input);
+        if (!n) return;
+        var p = nvToProxy(n);
+        if (!p) return;
+        if (forceTab) {
+          nvCreateTab(n, p, true);
+          return;
+        }
+        nvActivateTab(nvActiveTabId, p, n);
+      }
+      function nvIsLocalPath(pathname) {
+        return (
+          pathname === "/" ||
+          pathname === "/index.html" ||
+          pathname === "/nav/home" ||
+          pathname === "/nav/error" ||
+          pathname === "/api/fetch" ||
+          pathname === "/nv.sw.js" ||
+          pathname === "/nv.client.js" ||
+          pathname === "/nv.register.js" ||
+          pathname === "/favicon.ico" ||
+          pathname === "/generate_204"
+        );
+      }
+      function nvIsShellPath(pathname) {
+        return pathname === "/" || pathname === "/index.html" || pathname === "/app";
+      }
+      function nvIsShellUrl(rawUrl) {
+        if (!rawUrl) return false;
+        try {
+          var parsed = new URL(rawUrl, window.location.origin);
+          return parsed.origin === window.location.origin && nvIsShellPath(parsed.pathname);
+        } catch (e) {
+          return false;
+        }
+      }
+      function nvIsBrowserErrorUrl(rawUrl) {
+        if (!rawUrl) return false;
+        var u = String(rawUrl).toLowerCase();
+        return u.indexOf("about:blank") === 0 || u.indexOf("chrome-error://") === 0;
+      }
+      function nvSanitizeTab(tab) {
+        if (!tab) return tab;
+        if (nvIsShellUrl(tab.src) || nvIsShellUrl(tab.url)) {
+          tab.url = "nav://home";
+          tab.src = "/nav/home";
+          tab.label = nvDisplayLabel(tab.url);
+        }
+        return tab;
+      }
+      function nvNormalizeFrameSrc(rawSrc, displayUrl) {
+        if (typeof rawSrc !== "string" || !rawSrc.trim()) return null;
+        var src = rawSrc.trim();
+        if (src.indexOf("/nv/") === 0 || nvIsLocalPath(src)) return src;
+        try {
+          var parsed = new URL(src, window.location.origin);
+          if (parsed.origin === window.location.origin) {
+            var localSrc = parsed.pathname + parsed.search + parsed.hash;
+            if (localSrc.indexOf("/nv/") === 0 || nvIsLocalPath(parsed.pathname)) return localSrc;
+          }
+        } catch (e) {}
+        var target = displayUrl || src;
+        var normalized = nvNormalize(target);
+        if (!normalized) return null;
+        return nvToProxy(normalized);
+      }
+      function nvCanonicalFramePath(rawSrc) {
+        if (typeof rawSrc !== "string" || !rawSrc.trim()) return "";
+        var src = rawSrc.trim();
+        if (src.indexOf("/nv/") === 0 || src.indexOf("/nav/") === 0) return src;
+        try {
+          var parsed = new URL(src, window.location.origin);
+          if (parsed.origin !== window.location.origin) return src;
+          return parsed.pathname + parsed.search + parsed.hash;
+        } catch (e) {
+          return src;
+        }
+      }
+      function nvOpenTopLevelProxy(rawSrc, displayUrl) {
+        if (nvIsOffline()) {
+          return nvOpenOfflineError(displayUrl || rawSrc);
+        }
+        var proxied = nvNormalizeFrameSrc(rawSrc, displayUrl);
+        if (!proxied || proxied.indexOf("/nv/") !== 0) return false;
+        var existing = null;
+        for (var i = 0; i < nvTabsState.length; i++) {
+          if (nvTabsState[i] && nvTabsState[i].src === proxied) {
+            existing = nvTabsState[i];
+            break;
+          }
+        }
+        if (existing) {
+          nvActivateTab(existing.id);
+          return true;
+        }
+        var display = nvDecodeProxyUrl(proxied) || displayUrl || rawSrc;
+        nvCreateTab(display, proxied, true);
+        return true;
+      }
+      function nvIsOffline() {
+        return typeof navigator !== "undefined" && navigator && navigator.onLine === false;
+      }
+      function nvBuildOfflineErrorUrl(rawUrl) {
+        var code = "NAVION_OFFLINE";
+        var message = "Browser is offline. Reconnect and retry.";
+        var encodedTarget = "";
+        if (typeof rawUrl === "string" && rawUrl) {
+          var normalized = nvNormalize(rawUrl);
+          if (normalized && /^https?:\/\//i.test(normalized)) {
+            encodedTarget = nvEncode(normalized) || "";
+          } else if (rawUrl.indexOf("/nv/") === 0) {
+            encodedTarget = rawUrl.slice(4).split("?")[0].split("#")[0];
+          }
+        }
+        var query = "?c=" + encodeURIComponent(code) + "&m=" + encodeURIComponent(message);
+        if (encodedTarget) query += "&u=" + encodeURIComponent(encodedTarget);
+        return "/nav/error" + query;
+      }
+      function nvOpenOfflineError(rawUrl) {
+        var target = nvBuildOfflineErrorUrl(rawUrl);
+        var tab = nvFindTab(nvActiveTabId);
+        if (!tab) return false;
+        tab.url = "nav://error.html";
+        tab.src = target;
+        tab.label = nvDisplayLabel(tab.url);
+        nvFrame.src = target;
+        nvRenderTabs();
+        nvSyncUi(tab);
+        nvSaveState();
+        return true;
+      }
+      function nvGuardFrameNavigation() {
+        var tab = nvFindTab(nvActiveTabId);
+        if (!tab) return;
+        var frameSrc = "";
+        var crossOriginLocked = false;
+        try {
+          frameSrc = String((nvFrame.contentWindow && nvFrame.contentWindow.location && nvFrame.contentWindow.location.href) || "").trim();
+        } catch (e) {
+          crossOriginLocked = true;
+          try {
+            frameSrc = String(nvFrame.src || "").trim();
+          } catch (e2) {
+            frameSrc = "";
+          }
+        }
+        if (!frameSrc) frameSrc = String(nvFrame.getAttribute("src") || "").trim();
+        if (!frameSrc) return;
+        if (crossOriginLocked) {
+          var crossAbsolute = null;
+          try {
+            crossAbsolute = new URL(frameSrc, window.location.origin);
+          } catch (e4) {
+            crossAbsolute = null;
+          }
+          if (crossAbsolute && crossAbsolute.origin !== window.location.origin) {
+            var crossHref = crossAbsolute.href;
+            var crossProtocol = String(crossAbsolute.protocol || "").toLowerCase();
+            if (crossProtocol !== "http:" && crossProtocol !== "https:") {
+              if (tab.url && nvShouldBreakOutAuth(tab.url)) {
+                nvOpenTopLevelProxy(tab.url, tab.url);
+                return;
+              }
+              var safeSrc = nvNormalizeFrameSrc(tab.src || "", tab.url);
+              if (safeSrc && safeSrc.indexOf("/nv/") === 0) {
+                tab.src = safeSrc;
+                nvFrame.src = safeSrc;
+                nvSaveState();
+              }
+              return;
+            }
+            if (nvShouldBreakOutAuth(crossHref) || (tab.url && nvShouldBreakOutAuth(tab.url))) {
+              nvOpenTopLevelProxy(crossHref, crossHref);
+              return;
+            }
+            var forcedProxy = nvNormalizeFrameSrc(crossHref, crossHref);
+            if (forcedProxy && forcedProxy.indexOf("/nv/") === 0) {
+              tab.src = forcedProxy;
+              nvFrame.src = forcedProxy;
+              nvSaveState();
+              return;
+            }
+          }
+        }
+        var normalizedSrc = nvNormalizeFrameSrc(frameSrc, tab.url);
+        if (!normalizedSrc) return;
+        nvSyncTabFromProxySrc(tab, normalizedSrc);
+        if (normalizedSrc.indexOf("/nv/") === 0) {
+          var encoded = normalizedSrc.slice(4).split("?")[0].split("#")[0];
+          var decoded = nvDecode(encoded);
+          if (decoded && nvShouldBreakOutAuth(decoded)) {
+            nvOpenTopLevelProxy(normalizedSrc, decoded);
+            return;
+          }
+        }
+        var canonicalFrame = nvCanonicalFramePath(frameSrc);
+        if (canonicalFrame !== normalizedSrc) {
+          tab.src = normalizedSrc;
+          var framePath = "";
+          try {
+            framePath = String(nvFrame.contentWindow.location.pathname || "");
+          } catch (e3) {
+            framePath = "";
+          }
+          if (!framePath || (!framePath.startsWith("/nv/") && !nvIsLocalPath(framePath))) {
+            nvFrame.src = normalizedSrc;
+          }
+          nvSaveState();
+        }
+      }
+      function nvShouldBreakOutAuth(url) {
+        if (typeof url !== "string" || !url) return false;
+        try {
+          var parsed = new URL(url, window.location.origin);
+          var host = parsed.hostname.toLowerCase();
+          var path = (parsed.pathname || "").toLowerCase();
+          var googleHost = host === "accounts.google.com" || host.endsWith(".google.com");
+          var youtubeHost = host === "youtube.com" || host === "www.youtube.com" || host.endsWith(".youtube.com");
+          return (
+            (googleHost && (path.indexOf("/servicelogin") !== -1 || path.indexOf("/signin") !== -1 || path.indexOf("/o/oauth2") !== -1 || path.indexOf("/consent") !== -1)) ||
+            (youtubeHost && (path.indexOf("/signin") !== -1 || path.indexOf("/signin_prompt") !== -1 || path.indexOf("/service_login") !== -1 || path.indexOf("/accounts") !== -1 || path.indexOf("/consent") !== -1))
+          );
+        } catch (e) {
+          return false;
+        }
+      }
+      function nvSyncTabFromProxySrc(tab, rawSrc) {
+        if (!tab || typeof rawSrc !== "string" || !rawSrc) return;
+        var display = nvDecodeProxyUrl(rawSrc);
+        if (!display || nvIsShellUrl(display) || nvIsBrowserErrorUrl(display)) return;
+        if (tab.url === display) return;
+        nvSetTabUrl(tab, display);
+        nvRenderTabs();
+        nvSyncUi(tab);
+        nvSaveState();
+      }
+      var nvFrame = document.getElementById("nvFrame");
+      var nvUrl = document.getElementById("nvUrl");
+      var nvTabs = document.getElementById("nvTabs");
+      var nvSuggestions = document.getElementById("nvSuggestions");
+      var nvUrlEditing = false;
+      var nvTabSeq = 0;
+      var nvTabsState = [];
+      var nvActiveTabId = null;
+      var nvInitialTabCreated = false;
+      var NV_STATE_KEY = "navion-shell-state-v1";
+      var NV_HISTORY_KEY = "navion-history-v1";
+      var NV_HISTORY_MAX = 120;
+      var nvHistoryItems = [];
+
+      function nvFindTab(id) {
+        for (var i = 0; i < nvTabsState.length; i++) {
+          if (nvTabsState[i].id === id) return nvTabsState[i];
+        }
+        return null;
+      }
+
+      function nvSaveState() {
+        try {
+          var payload = {
+            seq: nvTabSeq,
+            activeTabId: nvActiveTabId,
+            tabs: nvTabsState.map(function (tab) {
+              return { id: tab.id, url: tab.url, src: tab.src, label: tab.label };
+            }),
+          };
+          localStorage.setItem(NV_STATE_KEY, JSON.stringify(payload));
+        } catch (e) {}
+      }
+
+      function nvLoadState() {
+        try {
+          var raw = localStorage.getItem(NV_STATE_KEY);
+          if (!raw) return false;
+          var parsed = JSON.parse(raw);
+          if (!parsed || !Array.isArray(parsed.tabs) || !parsed.tabs.length) return false;
+          nvTabsState = parsed.tabs.filter(function (tab) {
+            return tab && typeof tab.id === "string" && typeof tab.url === "string" && typeof tab.src === "string";
+          }).map(function (tab) {
+            return nvSanitizeTab({
+              id: tab.id,
+              url: tab.url,
+              src: tab.src,
+              label: typeof tab.label === "string" && tab.label ? tab.label : nvDisplayLabel(tab.url),
+            });
+          });
+          if (!nvTabsState.length) return false;
+          nvTabSeq = Number(parsed.seq) || nvTabsState.length;
+          nvActiveTabId = parsed.activeTabId;
+          if (!nvFindTab(nvActiveTabId)) nvActiveTabId = nvTabsState[0].id;
+          var active = nvFindTab(nvActiveTabId);
+          nvSanitizeTab(active);
+          nvFrame.src = active.src;
+          nvRenderTabs();
+          nvSyncUi(active);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function nvSaveHistory() {
+        try { localStorage.setItem(NV_HISTORY_KEY, JSON.stringify(nvHistoryItems)); } catch (e) {}
+      }
+
+      function nvRenderSuggestions() {
+        if (!nvSuggestions) return;
+        nvSuggestions.innerHTML = "";
+        for (var i = 0; i < nvHistoryItems.length && i < 30; i++) {
+          var option = document.createElement("option");
+          option.value = nvHistoryItems[i];
+          nvSuggestions.appendChild(option);
+        }
+      }
+
+      function nvLoadHistory() {
+        try {
+          var raw = localStorage.getItem(NV_HISTORY_KEY);
+          if (!raw) return;
+          var parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return;
+          nvHistoryItems = parsed.filter(function (item) { return typeof item === "string" && item.trim(); }).slice(0, NV_HISTORY_MAX);
+        } catch (e) {}
+      }
+
+      function nvTrackHistory(url) {
+        if (typeof url !== "string") return;
+        var trimmed = url.trim();
+        if (!trimmed || trimmed === "nav://home") return;
+        nvHistoryItems = nvHistoryItems.filter(function (item) { return item !== trimmed; });
+        nvHistoryItems.unshift(trimmed);
+        if (nvHistoryItems.length > NV_HISTORY_MAX) nvHistoryItems.length = NV_HISTORY_MAX;
+        nvRenderSuggestions();
+        nvSaveHistory();
+      }
+
+      function nvRenderTabs() {
+        nvTabs.innerHTML = "";
+        for (var i = 0; i < nvTabsState.length; i++) {
+          (function (tab) {
+            var btn = document.createElement("div");
+            btn.className = "nv-tab" + (tab.id === nvActiveTabId ? " nv-tab-active" : "");
+            btn.title = tab.url;
+            btn.setAttribute("role", "button");
+            btn.tabIndex = 0;
+            btn.onclick = function (e) {
+              if (e.target && e.target.className === "nv-tab-close") return;
+              nvActivateTab(tab.id);
+            };
+            btn.onkeydown = function (e) {
+              if (e.key === "Enter" || e.key === " ") nvActivateTab(tab.id);
+            };
+            var label = document.createElement("span");
+            label.textContent = tab.label;
+            btn.appendChild(label);
+            var close = document.createElement("button");
+            close.type = "button";
+            close.className = "nv-tab-close";
+            close.textContent = "×";
+            close.onclick = function (e) {
+              e.stopPropagation();
+              nvCloseTab(tab.id);
+            };
+            btn.appendChild(close);
+            nvTabs.appendChild(btn);
+          })(nvTabsState[i]);
+        }
+        var add = document.createElement("button");
+        add.type = "button";
+        add.className = "nv-tab-new";
+        add.textContent = "+";
+        add.onclick = function () {
+          nvCreateTab("nav://home", "/nav/home", true);
+        };
+        nvTabs.appendChild(add);
+      }
+
+      function nvSyncUi(tab) {
+        if (!tab) return;
+        if (!nvUrlEditing) nvUrl.value = tab.url;
+        document.title = "Navion - " + tab.label;
+      }
+
+      function nvSetTabUrl(tab, url) {
+        if (!tab || !url) return;
+        tab.url = url;
+        tab.label = nvDisplayLabel(url);
+        nvTrackHistory(url);
+      }
+
+      function nvActivateTab(id, nextSrc, nextUrl) {
+        var tab = nvFindTab(id);
+        if (!tab) return;
+        if (nextUrl) nvSetTabUrl(tab, nextUrl);
+        nvActiveTabId = id;
+        if (nextSrc) tab.src = nextSrc;
+        nvSanitizeTab(tab);
+        nvFrame.src = tab.src;
+        nvRenderTabs();
+        nvSyncUi(tab);
+        nvSaveState();
+      }
+
+      function nvCreateTab(url, src, activate) {
+        var id = "nv_tab_" + (++nvTabSeq);
+        var tab = {
+          id: id,
+          url: url,
+          src: src || nvToProxy(url),
+          label: nvDisplayLabel(url),
+        };
+        nvSanitizeTab(tab);
+        nvTabsState.push(tab);
+        if (activate !== false) nvActiveTabId = id;
+        if (!nvInitialTabCreated) nvInitialTabCreated = true;
+        if (activate !== false) nvFrame.src = tab.src;
+        nvRenderTabs();
+        nvSyncUi(tab);
+        nvTrackHistory(url);
+        nvSaveState();
+        return tab;
+      }
+
+      function nvCloseTab(id) {
+        var idx = -1;
+        for (var i = 0; i < nvTabsState.length; i++) {
+          if (nvTabsState[i].id === id) { idx = i; break; }
+        }
+        if (idx === -1) return;
+        var wasActive = nvActiveTabId === id;
+        nvTabsState.splice(idx, 1);
+        if (!nvTabsState.length) {
+          nvCreateTab("nav://home", "/nav/home", true);
+          return;
+        }
+        if (wasActive) {
+          var next = nvTabsState[Math.min(idx, nvTabsState.length - 1)];
+          nvActiveTabId = next.id;
+          nvFrame.src = next.src;
+          nvSyncUi(next);
+        }
+        nvRenderTabs();
+        nvSaveState();
+      }
+
+      function nvOpenRequestedTab(url) {
+        if (typeof url !== "string" || !url.trim()) return;
+        var raw = url.trim();
+        var asPath = raw;
+        try {
+          var maybeAbsolute = new URL(raw, window.location.origin);
+          if (maybeAbsolute.origin === window.location.origin) {
+            asPath = maybeAbsolute.pathname + maybeAbsolute.search + maybeAbsolute.hash;
+          }
+        } catch (e) {}
+        if (asPath.indexOf("/nv/") === 0) {
+          var encodedPart = asPath.slice(4).split("?")[0].split("#")[0];
+          var decoded = nvDecode(encodedPart);
+          for (var i = 0; i < nvTabsState.length; i++) {
+            if (nvTabsState[i] && nvTabsState[i].src === asPath) {
+              nvActivateTab(nvTabsState[i].id);
+              return;
+            }
+          }
+          nvCreateTab(decoded || raw, asPath, true);
+          return;
+        }
+        var n = nvNormalize(raw);
+        if (!n) return;
+        nvCreateTab(n, nvToProxy(n), true);
+      }
+
+      function nvEnsureHomeMainPage() {
+        var homeTab = null;
+        for (var i = 0; i < nvTabsState.length; i++) {
+          if (nvTabsState[i].url === "nav://home" || nvTabsState[i].src === "/nav/home") {
+            homeTab = nvTabsState[i];
+            break;
+          }
+        }
+        if (homeTab) {
+          nvActivateTab(homeTab.id);
+          return;
+        }
+        nvCreateTab("nav://home", "/nav/home", true);
+      }
+
+      document.getElementById("nvForm").onsubmit = function (e) {
+        e.preventDefault();
+        nvUrlEditing = false;
+        nvOpen(nvUrl.value);
+      };
+      nvUrl.addEventListener("focus", function () { nvUrlEditing = true; });
+      nvUrl.addEventListener("blur", function () { nvUrlEditing = false; });
+      document.getElementById("nvBack").onclick = function () { try { nvFrame.contentWindow.history.back(); } catch (e) {} };
+      document.getElementById("nvForward").onclick = function () { try { nvFrame.contentWindow.history.forward(); } catch (e) {} };
+      document.getElementById("nvReload").onclick = function () { try { nvFrame.contentWindow.location.reload(); } catch (e) {} };
+      window.addEventListener("message", function (event) {
+        if (event.origin !== window.location.origin) return;
+        var data = event.data || {};
+        if (data.type === "navion-open-tab" && data.url) {
+          nvOpenRequestedTab(data.url);
+          return;
+        }
+        if (data.type === "navion-location" && nvActiveTabId && (data.url || data.proxyHref)) {
+          var activeTab = nvFindTab(nvActiveTabId);
+          if (!activeTab) return;
+          var proxyDisplay = "";
+          if (typeof data.proxyHref === "string") proxyDisplay = nvDecodeProxyUrl(data.proxyHref);
+          var displayUrl = proxyDisplay || data.url || activeTab.url;
+          if (nvIsShellUrl(displayUrl) || nvIsBrowserErrorUrl(displayUrl)) return;
+          if (nvShouldBreakOutAuth(displayUrl)) {
+            var authRaw = (typeof data.proxyHref === "string" && data.proxyHref) || displayUrl;
+            if (nvOpenTopLevelProxy(authRaw, displayUrl)) return;
+          }
+          nvSetTabUrl(activeTab, displayUrl);
+          if (data.proxyHref && typeof data.proxyHref === "string") {
+            var proxiedSrc = nvNormalizeFrameSrc(data.proxyHref, displayUrl);
+            if (proxiedSrc) activeTab.src = proxiedSrc;
+          }
+          nvRenderTabs();
+          nvSyncUi(activeTab);
+          nvSaveState();
+        }
+      });
+      setInterval(function () { nvGuardFrameNavigation(); }, 900);
+      nvFrame.addEventListener("load", function () {
+        var activeAtLoad = nvFindTab(nvActiveTabId);
+        if (activeAtLoad) nvSyncTabFromProxySrc(activeAtLoad, String(nvFrame.getAttribute("src") || nvFrame.src || ""));
+        try {
+          var path = nvFrame.contentWindow.location.pathname || "";
+          var search = nvFrame.contentWindow.location.search || "";
+          var hash = nvFrame.contentWindow.location.hash || "";
+          var currentUrl = nvFrame.contentWindow.location.href || "";
+          if (path.startsWith("/nv/")) {
+            var raw = path.slice(4);
+            var out = nvDecode(raw);
+            var active = nvFindTab(nvActiveTabId);
+            if (out && active) {
+              active.url = out;
+              active.label = nvDisplayLabel(out);
+              nvUrl.value = out;
+              nvRenderTabs();
+              nvSyncUi(active);
+              nvTrackHistory(out);
+              nvSaveState();
+            }
+          }
+          if (path === "/nav/home" || path === "/nav/error") {
+            var activeNav = nvFindTab(nvActiveTabId);
+            if (activeNav) {
+              activeNav.url = path === "/nav/home" ? "nav://home" : "nav://error.html";
+              activeNav.label = nvDisplayLabel(activeNav.url);
+              if (!nvUrlEditing) nvUrl.value = activeNav.url;
+              nvRenderTabs();
+              nvSyncUi(activeNav);
+              nvSaveState();
+            }
+          }
+          if (currentUrl && nvActiveTabId) {
+            var tab = nvFindTab(nvActiveTabId);
+            if (tab && nvIsShellUrl(currentUrl)) {
+              if (tab.src && tab.src.indexOf("/nv/") === 0 && nvFrame.getAttribute("src") !== tab.src) {
+                nvFrame.src = tab.src;
+              }
+              return;
+            }
+            if (tab && nvIsBrowserErrorUrl(currentUrl)) return;
+            if (tab && currentUrl !== tab.src) {
+              var normalizedSrc = nvNormalizeFrameSrc(currentUrl, tab.url);
+              if (normalizedSrc) {
+                tab.src = normalizedSrc;
+                if (!nvIsLocalPath(path)) {
+                  var frameAttr = String(nvFrame.getAttribute("src") || "");
+                  if (nvCanonicalFramePath(frameAttr) !== normalizedSrc) {
+                    nvFrame.src = normalizedSrc;
+                    nvSaveState();
+                    return;
+                  }
+                }
+              }
+            }
+            if (tab && !path.startsWith("/nv/") && !nvIsLocalPath(path)) {
+              try {
+                var inferred = new URL(path + search + hash, tab.url).href;
+                tab.url = inferred;
+                tab.label = nvDisplayLabel(inferred);
+                nvUrl.value = inferred;
+                nvRenderTabs();
+                nvSyncUi(tab);
+                nvTrackHistory(inferred);
+                nvSaveState();
+              } catch (e2) {}
+            }
+          }
+        } catch (e) {
+          var crossTab = nvFindTab(nvActiveTabId);
+          if (!crossTab) return;
+          nvSyncTabFromProxySrc(crossTab, String(nvFrame.getAttribute("src") || nvFrame.src || ""));
+          if (crossTab.url && nvShouldBreakOutAuth(crossTab.url)) {
+            nvOpenTopLevelProxy(crossTab.src || crossTab.url, crossTab.url);
+            return;
+          }
+          var restoreSrc = nvNormalizeFrameSrc(crossTab.src || "", crossTab.url);
+          if (restoreSrc && nvFrame.getAttribute("src") !== restoreSrc) {
+            nvFrame.src = restoreSrc;
+            nvSaveState();
+          }
+        }
+      });
+      nvLoadHistory();
+      nvRenderSuggestions();
+      if (!nvLoadState()) nvCreateTab("nav://home", "/nav/home", true);
+      nvEnsureHomeMainPage();
+    }();
+  </script>
+</body>
+</html>
