@@ -164,7 +164,8 @@
       var href = (_rl && _rl.href) || location.href;
       var u = new URL(href);
       if (u.pathname.startsWith("/nv/") && cfg.decode) {
-        var decoded = cfg.decode(u.pathname.slice(4));
+        var token = navionPathToken(u.pathname);
+        var decoded = token ? cfg.decode(token) : "";
         if (decoded && /^https?:\/\//i.test(decoded)) {
           cfg.base = decoded;
           return decoded;
@@ -173,6 +174,29 @@
       return href;
     } catch (_e) {
       return location.href;
+    }
+  }
+
+  function navionPathToken(pathname) {
+    if (!pathname || pathname.indexOf("/nv/") !== 0) return "";
+    var rawPath = pathname.slice(4);
+    if (!rawPath) return "";
+    var slash = rawPath.indexOf("/");
+    var token = slash === -1 ? rawPath : rawPath.slice(0, slash);
+    if (slash === -1) {
+      var markers = ["dist/", "_next/", "country.json", "duckchat/"];
+      for (var i = 0; i < markers.length; i++) {
+        var markerIndex = rawPath.indexOf(markers[i]);
+        if (markerIndex > 0) {
+          token = rawPath.slice(0, markerIndex);
+          break;
+        }
+      }
+    }
+    try {
+      return decodeURIComponent(token);
+    } catch (_e) {
+      return token;
     }
   }
 
@@ -216,6 +240,20 @@
       }
     } catch (_e) {}
     return cfg.rewrite(rawValue, base);
+  }
+
+  function patchBlockedStorageAccess() {
+    try {
+      if (window.top === window) return;
+      if (document.requestStorageAccessFor) {
+        Object.defineProperty(document, "requestStorageAccessFor", {
+          configurable: true,
+          value: function () {
+            return Promise.resolve();
+          },
+        });
+      }
+    } catch (_e) {}
   }
 
   function emitParentLocation() {
@@ -271,9 +309,6 @@
 
   function forceTopLevelProxyNavigation(rawUrl) {
     if (typeof rawUrl !== "string" || !rawUrl) return false;
-    if (isBrowserOffline()) {
-      return postOpenInParent(buildOfflineErrorPath(rawUrl));
-    }
     var proxied = rewriteUrlValue(rawUrl);
     if (typeof proxied !== "string" || !proxied) return false;
     return postOpenInParent(proxied);
@@ -411,6 +446,20 @@
     if (typeof attrName !== "string") return attrValue;
     var n = attrName.toLowerCase();
     if (n === "sandbox" && isFrameElement(el)) return normalizeSandboxValue(attrValue);
+    if (n === "src" && isFrameElement(el)) {
+      try {
+        var frameUrl = new URL(attrValue, currentBase());
+        var frameHost = frameUrl.hostname.toLowerCase();
+        if (
+          frameHost === "accounts.youtube.com" ||
+          frameHost.endsWith(".accounts.youtube.com") ||
+          frameHost === "accounts.google.com" ||
+          frameHost.endsWith(".accounts.google.com")
+        ) {
+          return "about:blank";
+        }
+      } catch (_e) {}
+    }
     if (URL_ATTRS[n]) return rewriteUrlValue(attrValue);
     if (SRCSET_ATTRS[n]) return rewriteSrcset(attrValue);
     return attrValue;
@@ -772,7 +821,8 @@
         host.endsWith(".improving.duckduckgo.com") ||
         path.indexOf("/t/static_fcp") === 0 ||
         path.indexOf("/t/page_home_searchbox_submit") === 0 ||
-        path.indexOf("/t/dc_error") === 0
+        path.indexOf("/t/dc_error") === 0 ||
+        (host === "duckduckgo.com" && path === "/y.js")
       );
     } catch (_e) {
       return false;
@@ -799,11 +849,12 @@
       if (shouldDropNetworkUrl(input)) return Promise.resolve(emptyFetchResponse(input));
       input = rewriteUrlValue(input);
       requestUrl = input;
-    } else if (input && typeof input === "object" && input.url) {
-      if (shouldDropNetworkUrl(input.url)) return Promise.resolve(emptyFetchResponse(input.url));
-      var rewrittenUrl = rewriteUrlValue(input.url);
-      if (rewrittenUrl !== input.url) {
-        input = new Request(rewrittenUrl, input);
+    } else if (input && typeof input === "object" && (input.url || input.href)) {
+      var objectUrl = input.url || input.href;
+      if (shouldDropNetworkUrl(input)) return Promise.resolve(emptyFetchResponse(objectUrl));
+      var rewrittenUrl = rewriteUrlValue(input);
+      if (rewrittenUrl !== objectUrl) {
+        input = input.url ? new Request(rewrittenUrl, input) : rewrittenUrl;
       }
       requestUrl = rewrittenUrl;
     }
@@ -812,6 +863,17 @@
       throw err;
     });
   };
+
+  if (window.Response && window.Response.prototype && typeof window.Response.prototype.json === "function") {
+    var nativeResponseJson = window.Response.prototype.json;
+    window.Response.prototype.json = function () {
+      return nativeResponseJson.call(this).catch(function (err) {
+        var message = String((err && err.message) || err || "");
+        if (message.indexOf("Unexpected end of JSON input") !== -1) return {};
+        throw err;
+      });
+    };
+  }
 
   var nativeXhrOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url) {
@@ -912,8 +974,17 @@
     };
   }
 
+  window.addEventListener("error", function (event) {
+    try {
+      if (isYouTubeHostName(currentTargetHost()) && String(event.message || "").indexOf("Fc") !== -1) {
+        event.preventDefault();
+      }
+    } catch (_e) {}
+  }, true);
+
   patchLocationApi();
   patchHistoryApi();
+  patchBlockedStorageAccess();
   ensureForcedDarkMode();
   observeForcedDarkMode();
   patchSandboxRuntimeHooks();

@@ -271,9 +271,6 @@
         }
       }
       function nvOpenTopLevelProxy(rawSrc, displayUrl) {
-        if (nvIsOffline()) {
-          return nvOpenOfflineError(displayUrl || rawSrc);
-        }
         var authTarget = displayUrl || nvDecodeProxyUrl(rawSrc) || rawSrc;
         if (nvShouldBreakOutAuth(authTarget)) {
           var authProxy = nvNormalizeFrameSrc(rawSrc, authTarget);

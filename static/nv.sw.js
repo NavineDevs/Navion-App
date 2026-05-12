@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.7";
+const CACHE_NAME = "navion-runtime-v4.2.12";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -56,6 +56,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (PASSTHROUGH.has(url.pathname)) {
+    if (url.pathname === "/generate_204") {
+      event.respondWith(new Response(null, {
+        status: 204,
+        headers: { "Cache-Control": "no-store" },
+      }));
+      return;
+    }
     event.respondWith(handleLocalRequest(event.request, url));
     return;
   }
@@ -95,11 +102,6 @@ async function handleCrossOriginRequest(request, requestUrl) {
       headers: { "Cache-Control": "no-store" },
     });
   }
-  if (navigator.onLine === false) {
-    const empty = emptyAssetResponse(request);
-    if (empty) return empty;
-    return offlineResponse(request, "Browser offline", 502);
-  }
   if (
     requestUrl.pathname === "/generate_204" &&
     (requestUrl.hostname === "i.ytimg.com" || requestUrl.hostname.endsWith(".ytimg.com"))
@@ -112,7 +114,9 @@ async function handleCrossOriginRequest(request, requestUrl) {
   const encoded = swEncode(requestUrl.href);
   if (!encoded) return errorResponse("Proxy Encode Failed", "Unable to encode upstream URL.", 502);
   try {
-    return await proxyWithEncoded(request, encoded);
+    const response = await proxyWithEncoded(request, encoded);
+    if (shouldReplaceAssetResponse(request, response)) return emptyAssetResponse(request);
+    return response;
   } catch (err) {
     const empty = emptyAssetResponse(request);
     if (empty) return empty;
@@ -186,8 +190,19 @@ function resolveTargetFromNavionUrl(url) {
   const rawPath = url.pathname.slice(NAVION_PREFIX.length);
   if (!rawPath) return null;
   const slash = rawPath.indexOf("/");
-  const rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
-  const suffix = slash === -1 ? "" : rawPath.slice(slash);
+  let rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
+  let suffix = slash === -1 ? "" : rawPath.slice(slash);
+  if (!suffix) {
+    const markers = ["dist/", "_next/", "country.json", "duckchat/"];
+    for (const marker of markers) {
+      const index = rawPath.indexOf(marker);
+      if (index > 0) {
+        rawToken = rawPath.slice(0, index);
+        suffix = "/" + rawPath.slice(index);
+        break;
+      }
+    }
+  }
   let token = rawToken;
   try { token = decodeURIComponent(rawToken); } catch {}
   const decoded = /^https?:\/\//i.test(token) ? token : swDecode(token);
@@ -296,15 +311,26 @@ async function safeFetch(request) {
 }
 
 async function handleNonNavionRequest(event, requestUrl) {
+  if (requestUrl.pathname === "/generate_204") {
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
   const knownAssetTarget = resolveKnownAssetTarget(requestUrl);
   if (knownAssetTarget) {
     const encoded = swEncode(knownAssetTarget);
-    if (encoded) return proxyWithEncoded(event.request, encoded);
-  }
-  if (navigator.onLine === false) {
-    const empty = emptyAssetResponse(event.request);
-    if (empty) return empty;
-    return offlineResponse(event.request, "Browser offline", 502);
+    if (encoded) {
+      try {
+        const response = await proxyWithEncoded(event.request, encoded);
+        if (shouldReplaceAssetResponse(event.request, response)) return emptyAssetResponse(event.request);
+        return response;
+      } catch (err) {
+        const empty = emptyAssetResponse(event.request);
+        if (empty) return empty;
+        return offlineResponse(event.request, err && err.message ? err.message : "Failed to fetch", 502);
+      }
+    }
   }
   if (PASSTHROUGH.has(requestUrl.pathname)) {
     return safeFetch(event.request);
@@ -330,7 +356,9 @@ async function handleNonNavionRequest(event, requestUrl) {
     if (event.request.mode === "navigate") {
       return Response.redirect(NAVION_PREFIX + encoded, 302);
     }
-    return await proxyWithEncoded(event.request, encoded);
+    const response = await proxyWithEncoded(event.request, encoded);
+    if (shouldReplaceAssetResponse(event.request, response)) return emptyAssetResponse(event.request);
+    return response;
   } catch (err) {
     return errorResponse("Proxy Fetch Failed", err && err.message ? err.message : "Failed to proxy non-prefixed request.", 502);
   }
@@ -345,6 +373,12 @@ function errorResponse(title, message, status) {
 
 function emptyAssetResponse(request) {
   const dest = String((request && request.destination) || "").toLowerCase();
+  let accept = "";
+  let pathname = "";
+  try {
+    accept = String((request && request.headers && request.headers.get("accept")) || "").toLowerCase();
+    pathname = new URL(request.url).pathname.toLowerCase();
+  } catch {}
   if (dest === "script") {
     return new Response("", {
       status: 200,
@@ -363,6 +397,21 @@ function emptyAssetResponse(request) {
       headers: { "Content-Type": "font/woff2", "Cache-Control": "no-store" },
     });
   }
+  if (dest === "audio") {
+    return new Response(new ArrayBuffer(0), {
+      status: 200,
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
+    });
+  }
+  if (
+    pathname.endsWith(".json") ||
+    accept.includes("application/json")
+  ) {
+    return new Response("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
   if (dest === "image") {
     return new Response(new ArrayBuffer(0), {
       status: 200,
@@ -370,6 +419,15 @@ function emptyAssetResponse(request) {
     });
   }
   return null;
+}
+
+function shouldReplaceAssetResponse(request, response) {
+  if (!request || !response) return false;
+  const empty = emptyAssetResponse(request);
+  if (!empty) return false;
+  if (response.status >= 400) return true;
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  return contentType.includes("text/html");
 }
 
 function offlineResponse(request, message, status) {
@@ -395,11 +453,6 @@ function offlineResponse(request, message, status) {
 
 async function handleRequest(event) {
   const request = event.request;
-  if (navigator.onLine === false) {
-    const empty = emptyAssetResponse(request);
-    if (empty) return empty;
-    return offlineResponse(request, "Browser offline", 502);
-  }
   const url = new URL(request.url);
   let targetUrl = resolveTargetFromNavionUrl(url);
   if (!targetUrl) targetUrl = await resolveRelativeNavionTarget(event, url);
@@ -414,6 +467,7 @@ async function handleRequest(event) {
 
   try {
     const response = await proxyWithEncoded(request, encoded);
+    if (shouldReplaceAssetResponse(request, response)) return emptyAssetResponse(request);
     return response;
   } catch (err) {
     const empty = emptyAssetResponse(request);

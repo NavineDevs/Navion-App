@@ -62,8 +62,19 @@ function resolveTargetFromNavionPath(pathname, search) {
   const rawPath = pathname.slice("/nv/".length);
   if (!rawPath) return null;
   const slash = rawPath.indexOf("/");
-  const rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
-  const suffix = slash === -1 ? "" : rawPath.slice(slash);
+  let rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
+  let suffix = slash === -1 ? "" : rawPath.slice(slash);
+  if (!suffix) {
+    const markers = ["dist/", "_next/", "country.json", "duckchat/"];
+    for (const marker of markers) {
+      const index = rawPath.indexOf(marker);
+      if (index > 0) {
+        rawToken = rawPath.slice(0, index);
+        suffix = `/${rawPath.slice(index)}`;
+        break;
+      }
+    }
+  }
   const token = decodeURIComponent(rawToken);
   const base = /^https?:\/\//i.test(token) ? token : decode(token);
   const target = new URL(base);
@@ -133,6 +144,42 @@ function findStaticFile(reqPath) {
   return null;
 }
 
+function requestOrigin(req) {
+  return `http://${req.headers.host}`;
+}
+
+function resolveBaseContext(req) {
+  let baseTarget = null;
+  let fromProxyReferer = false;
+  const origin = requestOrigin(req);
+  const referer = req.headers.referer || "";
+  if (referer) {
+    try {
+      const refUrl = new URL(referer);
+      if (refUrl.origin === origin) {
+        baseTarget = resolveBaseFromPath(refUrl.pathname);
+        fromProxyReferer = refUrl.pathname.startsWith("/nv/");
+      }
+    } catch {}
+  }
+
+  if (!baseTarget) {
+    try {
+      const cookies = parseCookies(req.headers.cookie || "");
+      if (cookies.nv_base) {
+        const decodedBase = decode(cookies.nv_base);
+        if (/^https?:\/\//i.test(decodedBase)) baseTarget = decodedBase;
+      }
+      if (!baseTarget && cookies.nv_origin) {
+        const decodedOrigin = decode(cookies.nv_origin);
+        if (/^https?:\/\//i.test(decodedOrigin)) baseTarget = decodedOrigin + "/";
+      }
+    } catch {}
+  }
+
+  return { baseTarget, fromProxyReferer };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -166,7 +213,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/app") {
+  const baseContext = resolveBaseContext(req);
+  const isShellAssetRequest = url.pathname === "/app" || url.pathname === "/index.html";
+
+  if (url.pathname === "/app" && !(baseContext.baseTarget && baseContext.fromProxyReferer)) {
     const filePath = path.join(APP_STATIC, "index.html");
     return serveFile(res, filePath);
   }
@@ -236,32 +286,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  let baseTarget = null;
-  let fromProxyReferer = false;
-  const referer = req.headers.referer || "";
-  if (referer) {
-    try {
-      const refUrl = new URL(referer);
-      if (refUrl.origin === `http://${req.headers.host}`) {
-        baseTarget = resolveBaseFromPath(refUrl.pathname);
-        fromProxyReferer = refUrl.pathname.startsWith("/nv/");
-      }
-    } catch {}
-  }
-
-  if (!baseTarget) {
-    try {
-      const cookies = parseCookies(req.headers.cookie || "");
-      if (cookies.nv_base) {
-        const decodedBase = decode(cookies.nv_base);
-        if (/^https?:\/\//i.test(decodedBase)) baseTarget = decodedBase;
-      }
-      if (!baseTarget && cookies.nv_origin) {
-        const decodedOrigin = decode(cookies.nv_origin);
-        if (/^https?:\/\//i.test(decodedOrigin)) baseTarget = decodedOrigin + "/";
-      }
-    } catch {}
-  }
+  let { baseTarget, fromProxyReferer } = baseContext;
 
   if (!baseTarget) {
     if (url.pathname.startsWith("/youtubei/") || url.pathname.startsWith("/s/")) {
@@ -269,7 +294,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  const isRootShellPath = url.pathname === "/" || url.pathname === "/index.html";
+  const isRootShellPath = url.pathname === "/" || isShellAssetRequest;
   const shouldForceProxyRoot =
     !!baseTarget && isRootShellPath && (fromProxyReferer || !!url.search || !!url.hash);
 
