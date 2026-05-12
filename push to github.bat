@@ -37,6 +37,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
+git -c safe.directory="%SAFE_DIR%" pull --rebase origin %BRANCH%
+if errorlevel 1 (
+  powershell -NoProfile -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Sync failed. Resolve rebase conflicts, then run again.','Push to GitHub') | Out-Null"
+  exit /b 1
+)
+
 git -c safe.directory="%SAFE_DIR%" push origin %BRANCH%
 if errorlevel 1 (
   powershell -NoProfile -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Push failed. Check terminal output.','Push to GitHub') | Out-Null"
