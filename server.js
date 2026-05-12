@@ -107,6 +107,25 @@ function isDroppedTelemetryUrl(url) {
   );
 }
 
+function resolveKnownAssetTarget(pathname, search) {
+  const pathValue = String(pathname || "");
+  if (
+    pathValue.startsWith("/dist/duckai-dist/") ||
+    pathValue.startsWith("/dist/locale/") ||
+    pathValue === "/country.json" ||
+    pathValue.startsWith("/duckchat/")
+  ) {
+    return new URL(pathValue + (search || ""), "https://duck.ai/").href;
+  }
+  if (pathValue.startsWith("/_next/")) {
+    return new URL(pathValue + (search || ""), "https://duckduckgo.com/").href;
+  }
+  if (pathValue.startsWith("/dist/")) {
+    return new URL(pathValue + (search || ""), "https://duckduckgo.com/").href;
+  }
+  return null;
+}
+
 function findStaticFile(reqPath) {
   const safePath = reqPath === "/" ? "/index.html" : reqPath;
   const appFile = path.join(APP_STATIC, safePath);
@@ -154,6 +173,13 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/nav/home") return serveFile(res, path.join(APP_STATIC, "nav.home.html"));
   if (url.pathname === "/nav/error") return serveFile(res, path.join(APP_STATIC, "nav.error.html"));
+
+  const knownAssetTarget = resolveKnownAssetTarget(url.pathname, url.search);
+  if (knownAssetTarget) {
+    const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
+    proxyUrl.searchParams.set("url", encode(knownAssetTarget));
+    return handleProxy(req, res, proxyUrl);
+  }
 
   if (url.pathname.startsWith("/nv/")) {
     let baseTarget = null;

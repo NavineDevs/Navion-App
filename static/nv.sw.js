@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.5";
+const CACHE_NAME = "navion-runtime-v4.2.7";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -162,6 +162,25 @@ function isDroppedTelemetryUrl(url) {
   );
 }
 
+function resolveKnownAssetTarget(url) {
+  const path = String(url.pathname || "");
+  if (
+    path.startsWith("/dist/duckai-dist/") ||
+    path.startsWith("/dist/locale/") ||
+    path === "/country.json" ||
+    path.startsWith("/duckchat/")
+  ) {
+    return new URL(path + url.search + url.hash, "https://duck.ai/").href;
+  }
+  if (path.startsWith("/_next/")) {
+    return new URL(path + url.search + url.hash, "https://duckduckgo.com/").href;
+  }
+  if (path.startsWith("/dist/")) {
+    return new URL(path + url.search + url.hash, "https://duckduckgo.com/").href;
+  }
+  return null;
+}
+
 function resolveTargetFromNavionUrl(url) {
   if (!url.pathname.startsWith(NAVION_PREFIX)) return null;
   const rawPath = url.pathname.slice(NAVION_PREFIX.length);
@@ -277,6 +296,11 @@ async function safeFetch(request) {
 }
 
 async function handleNonNavionRequest(event, requestUrl) {
+  const knownAssetTarget = resolveKnownAssetTarget(requestUrl);
+  if (knownAssetTarget) {
+    const encoded = swEncode(knownAssetTarget);
+    if (encoded) return proxyWithEncoded(event.request, encoded);
+  }
   if (navigator.onLine === false) {
     const empty = emptyAssetResponse(event.request);
     if (empty) return empty;

@@ -758,16 +758,21 @@
   }
 
   function shouldDropNetworkUrl(value) {
-    if (typeof value !== "string" || !value) return false;
+    var raw = "";
+    if (typeof value === "string") raw = value;
+    else if (value && typeof value.href === "string") raw = value.href;
+    else if (value && typeof value.url === "string") raw = value.url;
+    if (!raw) return false;
     try {
-      var parsed = new URL(value, currentBase());
+      var parsed = new URL(raw, currentBase());
       var host = parsed.hostname.toLowerCase();
       var path = parsed.pathname.toLowerCase();
       return (
         host === "improving.duckduckgo.com" ||
         host.endsWith(".improving.duckduckgo.com") ||
         path.indexOf("/t/static_fcp") === 0 ||
-        path.indexOf("/t/page_home_searchbox_submit") === 0
+        path.indexOf("/t/page_home_searchbox_submit") === 0 ||
+        path.indexOf("/t/dc_error") === 0
       );
     } catch (_e) {
       return false;
@@ -781,7 +786,9 @@
     else if (lower.indexOf(".js") !== -1 || lower.indexOf("/_next/static/chunks/") !== -1) headers["Content-Type"] = "application/javascript; charset=utf-8";
     else if (lower.indexOf(".json") !== -1) headers["Content-Type"] = "application/json; charset=utf-8";
     else headers["Content-Type"] = "text/plain; charset=utf-8";
-    var body = headers["Content-Type"].indexOf("json") !== -1 ? "{}" : "";
+    var body = "{}";
+    if (lower.indexOf("/duckchat/v1/status") !== -1) body = "{\"status\":\"ok\"}";
+    else if (headers["Content-Type"].indexOf("json") === -1) body = "";
     return new Response(body, { status: 200, headers: headers });
   }
 
@@ -809,7 +816,7 @@
   var nativeXhrOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url) {
     var args = Array.prototype.slice.call(arguments);
-    if (typeof url === "string" && shouldDropNetworkUrl(url)) url = "/generate_204";
+    if (shouldDropNetworkUrl(url)) url = "/generate_204";
     if (typeof url === "string") args[1] = rewriteUrlValue(url);
     return nativeXhrOpen.apply(this, args);
   };
@@ -848,7 +855,7 @@
   if (navigator.sendBeacon) {
     var nativeSendBeacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = function (url, data) {
-      if (typeof url === "string" && shouldDropNetworkUrl(url)) return true;
+      if (shouldDropNetworkUrl(url)) return true;
       if (typeof url === "string") url = rewriteUrlValue(url);
       return nativeSendBeacon(url, data);
     };
