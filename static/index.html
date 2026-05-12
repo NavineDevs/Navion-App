@@ -218,7 +218,12 @@
         if (!rawUrl) return false;
         try {
           var parsed = new URL(rawUrl, window.location.origin);
-          return parsed.origin === window.location.origin && nvIsShellPath(parsed.pathname);
+          return (
+            parsed.origin === window.location.origin &&
+            nvIsShellPath(parsed.pathname) &&
+            !parsed.search &&
+            !parsed.hash
+          );
         } catch (e) {
           return false;
         }
@@ -271,6 +276,13 @@
         }
         var authTarget = displayUrl || nvDecodeProxyUrl(rawSrc) || rawSrc;
         if (nvShouldBreakOutAuth(authTarget)) {
+          var authProxy = nvNormalizeFrameSrc(rawSrc, authTarget);
+          if (authProxy && authProxy.indexOf("/nv/") === 0) {
+            try {
+              window.location.href = authProxy;
+            } catch (e0) {}
+            return true;
+          }
           try {
             var authWin = window.open(authTarget, "_blank", "noopener,noreferrer");
             if (!authWin) window.location.href = authTarget;
