@@ -51,10 +51,27 @@ function parseCookies(headerValue) {
 
 function resolveBaseFromPath(pathname) {
   if (!pathname || !pathname.startsWith("/nv/")) return null;
-  const raw = decodeURIComponent(pathname.slice("/nv/".length));
+  const raw = decodeURIComponent(pathname.slice("/nv/".length).split("/")[0]);
   if (!raw) return null;
   if (/^https?:\/\//i.test(raw)) return raw;
   return decode(raw);
+}
+
+function resolveTargetFromNavionPath(pathname, search) {
+  if (!pathname || !pathname.startsWith("/nv/")) return null;
+  const rawPath = pathname.slice("/nv/".length);
+  if (!rawPath) return null;
+  const slash = rawPath.indexOf("/");
+  const rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
+  const suffix = slash === -1 ? "" : rawPath.slice(slash);
+  const token = decodeURIComponent(rawToken);
+  const base = /^https?:\/\//i.test(token) ? token : decode(token);
+  const target = new URL(base);
+  if (suffix) {
+    target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
+  }
+  if (search) target.search = search;
+  return target.href;
 }
 
 function serveFile(res, filePath) {
@@ -70,6 +87,17 @@ function serveFile(res, filePath) {
     res.end("Not found");
   });
   stream.pipe(res);
+}
+
+function isDroppedTelemetryUrl(url) {
+  const host = String(url.hostname || "").toLowerCase();
+  const pathname = String(url.pathname || "").toLowerCase();
+  return (
+    host === "improving.duckduckgo.com" ||
+    host.endsWith(".improving.duckduckgo.com") ||
+    pathname.indexOf("/t/static_fcp") === 0 ||
+    pathname.indexOf("/t/page_home_searchbox_submit") === 0
+  );
 }
 
 function findStaticFile(reqPath) {
@@ -121,26 +149,30 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/nav/error") return serveFile(res, path.join(APP_STATIC, "nav.error.html"));
 
   if (url.pathname.startsWith("/nv/")) {
-    const encoded = url.pathname.slice("/nv/".length);
-    if (!encoded) {
+    const target = resolveTargetFromNavionPath(url.pathname, url.search);
+    if (!target) {
       res.writeHead(302, { Location: "/" });
       res.end();
       return;
     }
     try {
-      const target = resolveBaseFromPath(url.pathname);
-      if (target) {
-        const targetOrigin = new URL(target).origin;
-        const stableBase = encode(targetOrigin + "/");
-        const stableOrigin = encode(targetOrigin);
-        res.setHeader("Set-Cookie", [
-          `nv_base=${stableBase}; Path=/; SameSite=Lax; Max-Age=2592000`,
-          `nv_origin=${stableOrigin}; Path=/; SameSite=Lax; Max-Age=2592000`,
-        ]);
-      }
+      const targetOrigin = new URL(target).origin;
+      const stableBase = encode(targetOrigin + "/");
+      const stableOrigin = encode(targetOrigin);
+      res.setHeader("Set-Cookie", [
+        `nv_base=${stableBase}; Path=/; SameSite=Lax; Max-Age=2592000`,
+        `nv_origin=${stableOrigin}; Path=/; SameSite=Lax; Max-Age=2592000`,
+      ]);
     } catch {}
     const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
-    proxyUrl.searchParams.set("url", encoded);
+    try {
+      if (isDroppedTelemetryUrl(new URL(target))) {
+        res.writeHead(204, { "Cache-Control": "no-store" });
+        res.end();
+        return;
+      }
+    } catch {}
+    proxyUrl.searchParams.set("url", encode(target));
     return handleProxy(req, res, proxyUrl);
   }
 

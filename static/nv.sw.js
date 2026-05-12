@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.2";
+const CACHE_NAME = "navion-runtime-v4.2.4";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -89,6 +89,12 @@ async function handleLocalRequest(request, url) {
 }
 
 async function handleCrossOriginRequest(request, requestUrl) {
+  if (isDroppedTelemetryUrl(requestUrl)) {
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
   if (navigator.onLine === false) {
     const empty = emptyAssetResponse(request);
     if (empty) return empty;
@@ -134,12 +140,44 @@ function swDecode(encoded) {
 
 function decodeNavionPath(pathname) {
   if (!pathname.startsWith(NAVION_PREFIX)) return null;
-  const rawPath = pathname.slice(NAVION_PREFIX.length);
+  const rawPath = pathname.slice(NAVION_PREFIX.length).split("/")[0];
   if (!rawPath) return null;
   const decodedPath = swDecode(rawPath);
   if (decodedPath) return decodedPath;
   try {
     return decodeURIComponent(rawPath);
+  } catch {
+    return null;
+  }
+}
+
+function isDroppedTelemetryUrl(url) {
+  const host = String(url.hostname || "").toLowerCase();
+  const path = String(url.pathname || "").toLowerCase();
+  return (
+    host === "improving.duckduckgo.com" ||
+    host.endsWith(".improving.duckduckgo.com") ||
+    path.indexOf("/t/static_fcp") === 0 ||
+    path.indexOf("/t/page_home_searchbox_submit") === 0
+  );
+}
+
+function resolveTargetFromNavionUrl(url) {
+  if (!url.pathname.startsWith(NAVION_PREFIX)) return null;
+  const rawPath = url.pathname.slice(NAVION_PREFIX.length);
+  if (!rawPath) return null;
+  const slash = rawPath.indexOf("/");
+  const rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
+  const suffix = slash === -1 ? "" : rawPath.slice(slash);
+  let token = rawToken;
+  try { token = decodeURIComponent(rawToken); } catch {}
+  const decoded = /^https?:\/\//i.test(token) ? token : swDecode(token);
+  if (!decoded || !/^https?:\/\//i.test(decoded)) return null;
+  try {
+    const target = new URL(decoded);
+    if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
+    if (url.search) target.search = url.search;
+    return target.href;
   } catch {
     return null;
   }
@@ -326,20 +364,11 @@ async function handleRequest(request) {
     return offlineResponse(request, "Browser offline", 502);
   }
   const url = new URL(request.url);
-  let raw = url.pathname.slice(NAVION_PREFIX.length);
-
-  if (!raw) {
+  const targetUrl = resolveTargetFromNavionUrl(url);
+  if (!targetUrl) {
     return errorResponse("Missing URL", "No URL was provided to proxy.", 400);
   }
-
-  try { raw = decodeURIComponent(raw); } catch {}
-
-  let encoded;
-  if (/^https?:\/\//i.test(raw)) {
-    encoded = swEncode(raw);
-  } else {
-    encoded = raw;
-  }
+  const encoded = swEncode(targetUrl);
 
   if (!encoded) {
     return errorResponse("Invalid URL", "The URL could not be encoded.", 400);

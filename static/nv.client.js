@@ -336,11 +336,25 @@
     var out = [];
     var current = "";
     var depth = 0;
+    var inDataUrl = false;
+    var dataCommaSeen = false;
     for (var i = 0; i < value.length; i++) {
       var ch = value[i];
+      if (!current.trim() && value.slice(i, i + 5).toLowerCase() === "data:") {
+        inDataUrl = true;
+        dataCommaSeen = false;
+      }
       if (ch === "(") depth++;
       else if (ch === ")" && depth > 0) depth--;
-      if (ch === "," && depth === 0) {
+      if (inDataUrl) {
+        if (ch === "," && !dataCommaSeen) {
+          dataCommaSeen = true;
+          current += ch;
+          continue;
+        }
+        if (dataCommaSeen && /\s/.test(ch)) inDataUrl = false;
+      }
+      if (ch === "," && depth === 0 && !inDataUrl) {
         if (current.trim()) out.push(current.trim());
         current = "";
         continue;
@@ -353,6 +367,7 @@
       var pieces = part.split(/\s+/);
       if (!pieces.length) continue;
       var sourceUrl = pieces[0];
+      if (/^(data:|blob:)/i.test(sourceUrl)) continue;
       var rewritten = rewriteUrlValue(sourceUrl);
       if (typeof rewritten === "string" && rewritten !== sourceUrl) {
         pieces[0] = rewritten;
@@ -732,22 +747,69 @@
     window.addEventListener("hashchange", function () { emitParentLocation(); }, true);
   }
 
+  function isProxiedLocalUrl(value) {
+    if (typeof value !== "string" || !value) return false;
+    try {
+      var parsed = new URL(value, location.href);
+      return parsed.origin === location.origin && parsed.pathname.indexOf("/nv/") === 0;
+    } catch (_e) {
+      return value.indexOf("/nv/") === 0;
+    }
+  }
+
+  function shouldDropNetworkUrl(value) {
+    if (typeof value !== "string" || !value) return false;
+    try {
+      var parsed = new URL(value, currentBase());
+      var host = parsed.hostname.toLowerCase();
+      var path = parsed.pathname.toLowerCase();
+      return (
+        host === "improving.duckduckgo.com" ||
+        host.endsWith(".improving.duckduckgo.com") ||
+        path.indexOf("/t/static_fcp") === 0 ||
+        path.indexOf("/t/page_home_searchbox_submit") === 0
+      );
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function emptyFetchResponse(url) {
+    var headers = { "Cache-Control": "no-store" };
+    var lower = String(url || "").toLowerCase();
+    if (lower.indexOf(".css") !== -1) headers["Content-Type"] = "text/css; charset=utf-8";
+    else if (lower.indexOf(".js") !== -1 || lower.indexOf("/_next/static/chunks/") !== -1) headers["Content-Type"] = "application/javascript; charset=utf-8";
+    else if (lower.indexOf(".json") !== -1) headers["Content-Type"] = "application/json; charset=utf-8";
+    else headers["Content-Type"] = "text/plain; charset=utf-8";
+    var body = headers["Content-Type"].indexOf("json") !== -1 ? "{}" : "";
+    return new Response(body, { status: 200, headers: headers });
+  }
+
   var nativeFetch = window.fetch;
   window.fetch = function (input, init) {
+    var requestUrl = "";
     if (typeof input === "string") {
+      if (shouldDropNetworkUrl(input)) return Promise.resolve(emptyFetchResponse(input));
       input = rewriteUrlValue(input);
+      requestUrl = input;
     } else if (input && typeof input === "object" && input.url) {
+      if (shouldDropNetworkUrl(input.url)) return Promise.resolve(emptyFetchResponse(input.url));
       var rewrittenUrl = rewriteUrlValue(input.url);
       if (rewrittenUrl !== input.url) {
         input = new Request(rewrittenUrl, input);
       }
+      requestUrl = rewrittenUrl;
     }
-    return nativeFetch.apply(this, [input, init]);
+    return nativeFetch.apply(this, [input, init]).catch(function (err) {
+      if (isProxiedLocalUrl(requestUrl)) return emptyFetchResponse(requestUrl);
+      throw err;
+    });
   };
 
   var nativeXhrOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url) {
     var args = Array.prototype.slice.call(arguments);
+    if (typeof url === "string" && shouldDropNetworkUrl(url)) url = "/generate_204";
     if (typeof url === "string") args[1] = rewriteUrlValue(url);
     return nativeXhrOpen.apply(this, args);
   };
@@ -786,6 +848,7 @@
   if (navigator.sendBeacon) {
     var nativeSendBeacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = function (url, data) {
+      if (typeof url === "string" && shouldDropNetworkUrl(url)) return true;
       if (typeof url === "string") url = rewriteUrlValue(url);
       return nativeSendBeacon(url, data);
     };
@@ -805,7 +868,6 @@
   }
 
   if (!isLiteMode && window.navigation && typeof window.navigation.addEventListener === "function") {
-    // Atlas-style navigation interception for modern SPA navigation API.
     window.navigation.addEventListener("navigate", function (event) {
       if (!event || !event.canIntercept || event.hashChange || event.downloadRequest !== null) return;
       var destination = event.destination && event.destination.url;
