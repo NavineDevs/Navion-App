@@ -279,7 +279,17 @@
           var authProxy = nvNormalizeFrameSrc(rawSrc, authTarget);
           if (authProxy && authProxy.indexOf("/nv/") === 0) {
             try {
-              window.location.href = authProxy;
+              var activeAuthTab = nvFindTab(nvActiveTabId);
+              if (activeAuthTab) {
+                activeAuthTab.src = authProxy;
+                nvSetTabUrl(activeAuthTab, authTarget);
+                nvFrame.src = authProxy;
+                nvRenderTabs();
+                nvSyncUi(activeAuthTab);
+                nvSaveState();
+              } else {
+                nvCreateTab(authTarget, authProxy, true);
+              }
             } catch (e0) {}
             return true;
           }

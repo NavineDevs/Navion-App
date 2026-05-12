@@ -89,6 +89,11 @@ async function handleLocalRequest(request, url) {
 }
 
 async function handleCrossOriginRequest(request, requestUrl) {
+  if (navigator.onLine === false) {
+    const empty = emptyAssetResponse(request);
+    if (empty) return empty;
+    return offlineResponse(request, "Browser offline", 502);
+  }
   if (
     requestUrl.pathname === "/generate_204" &&
     (requestUrl.hostname === "i.ytimg.com" || requestUrl.hostname.endsWith(".ytimg.com"))
@@ -222,6 +227,11 @@ async function safeFetch(request) {
 }
 
 async function handleNonNavionRequest(event, requestUrl) {
+  if (navigator.onLine === false) {
+    const empty = emptyAssetResponse(event.request);
+    if (empty) return empty;
+    return offlineResponse(event.request, "Browser offline", 502);
+  }
   if (PASSTHROUGH.has(requestUrl.pathname)) {
     return safeFetch(event.request);
   }
@@ -310,6 +320,11 @@ function offlineResponse(request, message, status) {
 }
 
 async function handleRequest(request) {
+  if (navigator.onLine === false) {
+    const empty = emptyAssetResponse(request);
+    if (empty) return empty;
+    return offlineResponse(request, "Browser offline", 502);
+  }
   const url = new URL(request.url);
   let raw = url.pathname.slice(NAVION_PREFIX.length);
 
