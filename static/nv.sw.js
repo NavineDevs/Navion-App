@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.14";
+const CACHE_NAME = "navion-runtime-v4.2.15";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -33,6 +33,11 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.map((key) => key === CACHE_NAME ? null : caches.delete(key))))
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (!event.data || event.data.type !== "NV_SKIP_WAITING") return;
+  self.skipWaiting();
 });
 
 self.addEventListener("fetch", (event) => {
@@ -378,6 +383,8 @@ function proxyFailureResponse(request, title, message, status) {
   if (isNavigationRequest(request)) {
     return navigationErrorResponse(request);
   }
+  const empty = emptyAssetResponse(request);
+  if (empty) return empty;
   return errorResponse(title, message, status);
 }
 
