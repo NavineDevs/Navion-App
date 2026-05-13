@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.13";
+const CACHE_NAME = "navion-runtime-v4.2.14";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -116,6 +116,7 @@ async function handleCrossOriginRequest(request, requestUrl) {
   try {
     const response = await proxyWithEncoded(request, encoded);
     if (shouldReplaceAssetResponse(request, response)) return emptyAssetResponse(request);
+    if (shouldReplaceNavigationResponse(request, response)) return navigationErrorResponse(request);
     return response;
   } catch (err) {
     const empty = emptyAssetResponse(request);
@@ -324,6 +325,7 @@ async function handleNonNavionRequest(event, requestUrl) {
       try {
         const response = await proxyWithEncoded(event.request, encoded);
         if (shouldReplaceAssetResponse(event.request, response)) return emptyAssetResponse(event.request);
+        if (shouldReplaceNavigationResponse(event.request, response)) return navigationErrorResponse(event.request);
         return response;
       } catch (err) {
         const empty = emptyAssetResponse(event.request);
@@ -358,6 +360,7 @@ async function handleNonNavionRequest(event, requestUrl) {
     }
     const response = await proxyWithEncoded(event.request, encoded);
     if (shouldReplaceAssetResponse(event.request, response)) return emptyAssetResponse(event.request);
+    if (shouldReplaceNavigationResponse(event.request, response)) return navigationErrorResponse(event.request);
     return response;
   } catch (err) {
     return proxyFailureResponse(event.request, "Proxy Fetch Failed", err && err.message ? err.message : "Failed to proxy non-prefixed request.", 502);
@@ -373,9 +376,21 @@ function errorResponse(title, message, status) {
 
 function proxyFailureResponse(request, title, message, status) {
   if (isNavigationRequest(request)) {
-    return Response.redirect("/nav/error", 302);
+    return navigationErrorResponse(request);
   }
   return errorResponse(title, message, status);
+}
+
+function navigationErrorResponse(request) {
+  let next = "/nav/error";
+  try {
+    const reqUrl = new URL(request.url);
+    if (reqUrl.pathname.startsWith(NAVION_PREFIX)) {
+      const encoded = reqUrl.pathname.slice(NAVION_PREFIX.length).split("?")[0].split("#")[0];
+      if (encoded) next = "/nav/error?u=" + encodeURIComponent(encoded);
+    }
+  } catch {}
+  return Response.redirect(next, 302);
 }
 
 function isNavigationRequest(request) {
@@ -449,19 +464,15 @@ function shouldReplaceAssetResponse(request, response) {
   return contentType.includes("text/html");
 }
 
+function shouldReplaceNavigationResponse(request, response) {
+  return isNavigationRequest(request) && response && response.status >= 500;
+}
+
 function offlineResponse(request, message, status) {
   try {
     const accept = String((request && request.headers && request.headers.get("accept")) || "").toLowerCase();
     if (isNavigationRequest(request)) {
-      let next = "/nav/error";
-      try {
-        const reqUrl = new URL(request.url);
-        if (reqUrl.pathname.startsWith(NAVION_PREFIX)) {
-          const encoded = reqUrl.pathname.slice(NAVION_PREFIX.length).split("?")[0].split("#")[0];
-          if (encoded) next = "/nav/error?u=" + encodeURIComponent(encoded);
-        }
-      } catch {}
-      return Response.redirect(next, 302);
+      return navigationErrorResponse(request);
     }
   } catch {}
   return errorResponse("Connection Failed", message || "Failed to fetch", status || 502);
@@ -484,6 +495,7 @@ async function handleRequest(event) {
   try {
     const response = await proxyWithEncoded(request, encoded);
     if (shouldReplaceAssetResponse(request, response)) return emptyAssetResponse(request);
+    if (shouldReplaceNavigationResponse(request, response)) return navigationErrorResponse(request);
     return response;
   } catch (err) {
     const empty = emptyAssetResponse(request);
