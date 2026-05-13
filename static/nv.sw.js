@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.15";
+const CACHE_NAME = "navion-runtime-v4.2.18";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -301,10 +301,23 @@ async function proxyWithEncoded(request, encoded) {
     forwardHeaders[key] = value;
   }
 
-  return fetch(apiUrl.href, {
+  const response = await fetch(apiUrl.href, {
     method: request.method,
     headers: forwardHeaders,
     body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.blob(),
+  });
+  return normalizeProxyResponse(request, response);
+}
+
+function normalizeProxyResponse(request, response) {
+  if (!response) return response;
+  if (response.status < 500) return response;
+  if (isNavigationRequest(request)) return navigationErrorResponse(request);
+  const empty = emptyAssetResponse(request);
+  if (empty) return empty;
+  return new Response("", {
+    status: 204,
+    headers: { "Cache-Control": "no-store" },
   });
 }
 

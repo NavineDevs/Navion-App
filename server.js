@@ -295,10 +295,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   const isRootShellPath = url.pathname === "/" || isShellAssetRequest;
-  const shouldForceProxyRoot =
-    !!baseTarget && isRootShellPath && (fromProxyReferer || !!url.search || !!url.hash);
 
-  if (baseTarget && (!NAVION_APP_LOCAL_ASSET_PATHS.has(url.pathname) || shouldForceProxyRoot)) {
+  if (isRootShellPath) {
+    const shellFile = path.join(APP_STATIC, "index.html");
+    return serveFile(res, shellFile);
+  }
+
+  if (baseTarget && !NAVION_APP_LOCAL_ASSET_PATHS.has(url.pathname)) {
     try {
       const target = new URL(url.pathname + url.search + url.hash, baseTarget).href;
       const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);

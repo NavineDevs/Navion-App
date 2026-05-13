@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Navion Browser</title>
-  <script src="/nv.register.js"></script>
+  <script src="/nv.register.js?v=4.2.18"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -149,7 +149,7 @@
         if (!s) return null;
         var lower = s.toLowerCase();
         if (lower === "nav://home") return "nav://home";
-        if (lower === "nav://error" || lower === "nav://error.html") return "nav://error.html";
+        if (lower === "nav://error" || lower === "nav://error.html") return "nav://error";
         if (/^!g\s+/.test(lower) || /^g\s+/.test(lower)) {
           var gQuery = s.replace(/^(!g|g)\s+/i, "").trim();
           if (!gQuery) return null;
@@ -171,13 +171,13 @@
       }
       function nvToProxy(url) {
         if (url === "nav://home") return "/nav/home";
-        if (url === "nav://error.html") return "/nav/error";
+        if (url === "nav://error") return "/nav/error";
         var c = nvEncode(url);
         return c ? "/nv/" + c : null;
       }
       function nvDisplayLabel(url) {
         if (url === "nav://home") return "home";
-        if (url === "nav://error.html") return "error";
+        if (url === "nav://error") return "error";
         try {
           var u = new URL(url);
           if (u.hostname) return u.hostname.replace(/^www\./i, "");
@@ -192,6 +192,10 @@
         var p = nvToProxy(n);
         if (!p) return;
         if (forceTab) {
+          nvCreateTab(n, p, true);
+          return;
+        }
+        if (!nvActiveTabId || !nvFindTab(nvActiveTabId)) {
           nvCreateTab(n, p, true);
           return;
         }
@@ -338,7 +342,7 @@
         var target = nvBuildOfflineErrorUrl(rawUrl);
         var tab = nvFindTab(nvActiveTabId);
         if (!tab) return false;
-        tab.url = "nav://error.html";
+        tab.url = "nav://error";
         tab.src = target;
         tab.label = nvDisplayLabel(tab.url);
         nvFrame.src = target;
@@ -457,6 +461,14 @@
       var nvUrl = document.getElementById("nvUrl");
       var nvTabs = document.getElementById("nvTabs");
       var nvSuggestions = document.getElementById("nvSuggestions");
+      var nvForm = document.getElementById("nvForm");
+      var nvBackBtn = document.getElementById("nvBack");
+      var nvForwardBtn = document.getElementById("nvForward");
+      var nvReloadBtn = document.getElementById("nvReload");
+      if (!nvFrame || !nvUrl || !nvTabs || !nvForm || !nvBackBtn || !nvForwardBtn || !nvReloadBtn) {
+        window.location.href = "/app";
+        return;
+      }
       var nvUrlEditing = false;
       var nvTabSeq = 0;
       var nvTabsState = [];
@@ -575,7 +587,7 @@
             var close = document.createElement("button");
             close.type = "button";
             close.className = "nv-tab-close";
-            close.textContent = "×";
+            close.textContent = "x";
             close.onclick = function (e) {
               e.stopPropagation();
               nvCloseTab(tab.id);
@@ -704,16 +716,17 @@
         nvCreateTab("nav://home", "/nav/home", true);
       }
 
-      document.getElementById("nvForm").onsubmit = function (e) {
+      nvForm.onsubmit = function (e) {
         e.preventDefault();
         nvUrlEditing = false;
+        if (!nvUrl.value || !nvUrl.value.trim()) return;
         nvOpen(nvUrl.value);
       };
       nvUrl.addEventListener("focus", function () { nvUrlEditing = true; });
       nvUrl.addEventListener("blur", function () { nvUrlEditing = false; });
-      document.getElementById("nvBack").onclick = function () { try { nvFrame.contentWindow.history.back(); } catch (e) {} };
-      document.getElementById("nvForward").onclick = function () { try { nvFrame.contentWindow.history.forward(); } catch (e) {} };
-      document.getElementById("nvReload").onclick = function () { try { nvFrame.contentWindow.location.reload(); } catch (e) {} };
+      nvBackBtn.onclick = function () { try { nvFrame.contentWindow.history.back(); } catch (e) {} };
+      nvForwardBtn.onclick = function () { try { nvFrame.contentWindow.history.forward(); } catch (e) {} };
+      nvReloadBtn.onclick = function () { try { nvFrame.contentWindow.location.reload(); } catch (e) {} };
       window.addEventListener("message", function (event) {
         if (event.origin !== window.location.origin) return;
         var data = event.data || {};
@@ -768,7 +781,7 @@
           if (path === "/nav/home" || path === "/nav/error") {
             var activeNav = nvFindTab(nvActiveTabId);
             if (activeNav) {
-              activeNav.url = path === "/nav/home" ? "nav://home" : "nav://error.html";
+              activeNav.url = path === "/nav/home" ? "nav://home" : "nav://error";
               activeNav.label = nvDisplayLabel(activeNav.url);
               if (!nvUrlEditing) nvUrl.value = activeNav.url;
               nvRenderTabs();
