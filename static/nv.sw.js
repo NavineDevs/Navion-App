@@ -1,6 +1,6 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.12";
+const CACHE_NAME = "navion-runtime-v4.2.13";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
   "/nv.client.js",
@@ -112,7 +112,7 @@ async function handleCrossOriginRequest(request, requestUrl) {
     });
   }
   const encoded = swEncode(requestUrl.href);
-  if (!encoded) return errorResponse("Proxy Encode Failed", "Unable to encode upstream URL.", 502);
+  if (!encoded) return proxyFailureResponse(request, "Proxy Encode Failed", "Unable to encode upstream URL.", 502);
   try {
     const response = await proxyWithEncoded(request, encoded);
     if (shouldReplaceAssetResponse(request, response)) return emptyAssetResponse(request);
@@ -120,7 +120,7 @@ async function handleCrossOriginRequest(request, requestUrl) {
   } catch (err) {
     const empty = emptyAssetResponse(request);
     if (empty) return empty;
-    return errorResponse("Proxy Fetch Failed", err && err.message ? err.message : "Cross-origin proxy request failed.", 502);
+    return proxyFailureResponse(request, "Proxy Fetch Failed", err && err.message ? err.message : "Cross-origin proxy request failed.", 502);
   }
 }
 
@@ -351,7 +351,7 @@ async function handleNonNavionRequest(event, requestUrl) {
       baseUrl
     ).href;
     const encoded = swEncode(targetUrl);
-    if (!encoded) return errorResponse("Proxy Encode Failed", "Unable to encode target URL.", 502);
+    if (!encoded) return proxyFailureResponse(event.request, "Proxy Encode Failed", "Unable to encode target URL.", 502);
 
     if (event.request.mode === "navigate") {
       return Response.redirect(NAVION_PREFIX + encoded, 302);
@@ -360,7 +360,7 @@ async function handleNonNavionRequest(event, requestUrl) {
     if (shouldReplaceAssetResponse(event.request, response)) return emptyAssetResponse(event.request);
     return response;
   } catch (err) {
-    return errorResponse("Proxy Fetch Failed", err && err.message ? err.message : "Failed to proxy non-prefixed request.", 502);
+    return proxyFailureResponse(event.request, "Proxy Fetch Failed", err && err.message ? err.message : "Failed to proxy non-prefixed request.", 502);
   }
 }
 
@@ -369,6 +369,25 @@ function errorResponse(title, message, status) {
     status,
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
+}
+
+function proxyFailureResponse(request, title, message, status) {
+  if (isNavigationRequest(request)) {
+    return Response.redirect("/nav/error", 302);
+  }
+  return errorResponse(title, message, status);
+}
+
+function isNavigationRequest(request) {
+  try {
+    const accept = String((request && request.headers && request.headers.get("accept")) || "").toLowerCase();
+    return (
+      request &&
+      (request.mode === "navigate" || request.destination === "document" || accept.includes("text/html"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function emptyAssetResponse(request) {
@@ -433,10 +452,7 @@ function shouldReplaceAssetResponse(request, response) {
 function offlineResponse(request, message, status) {
   try {
     const accept = String((request && request.headers && request.headers.get("accept")) || "").toLowerCase();
-    if (
-      request &&
-      (request.mode === "navigate" || request.destination === "document" || accept.includes("text/html"))
-    ) {
+    if (isNavigationRequest(request)) {
       let next = "/nav/error";
       try {
         const reqUrl = new URL(request.url);
