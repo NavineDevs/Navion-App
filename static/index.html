@@ -542,15 +542,15 @@
       var NV_HISTORY_MAX = 120;
       var nvHistoryItems = [];
       var nvPendingFrameSrc = "";
+      var nvLastFrameSetAt = 0;
 
       function nvSetFrameSource(src) {
         if (!src) return;
+        var current = String(nvFrame.getAttribute("src") || "");
+        if (current === src && Date.now() - nvLastFrameSetAt < 1200) return;
         nvPendingFrameSrc = src;
-        nvFrame.setAttribute("src", "about:blank");
-        setTimeout(function () {
-          if (nvPendingFrameSrc !== src) return;
-          nvFrame.setAttribute("src", src);
-        }, 0);
+        nvLastFrameSetAt = Date.now();
+        nvFrame.setAttribute("src", src);
       }
 
       function nvFindTab(id) {
