@@ -1,10 +1,10 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.42";
+const CACHE_NAME = "navion-runtime-v4.2.43";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=4.2.42",
-  "/nv.register.js?v=4.2.42",
+  "/nv.client.js?v=4.2.43",
+  "/nv.register.js?v=4.2.43",
   "/nav/home",
   "/nav/error",
 ];
@@ -87,8 +87,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=4.2.42" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=4.2.42" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=4.2.43" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=4.2.43" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);

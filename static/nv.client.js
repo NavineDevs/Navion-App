@@ -4,6 +4,7 @@
   var mode = cfg.mode || "full";
   var passiveMode = mode === "lite-nav";
   var lightMode = mode === "youtube" || mode === "lite" || passiveMode;
+  var navigationRedirecting = false;
 
   var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1 };
   var LOCAL_ALLOW = {
@@ -228,17 +229,24 @@
     try {
       window.navigation.addEventListener("navigate", function (event) {
         if (!event) return;
+        if (navigationRedirecting) return;
         if (event.hashChange || event.downloadRequest != null) return;
+        if (event.formData) return;
         if (!event.destination || typeof event.destination.url !== "string") return;
         var dest = event.destination.url;
         var rewritten = rewriteUrl(dest);
         if (rewritten === dest) return;
-        if (typeof event.intercept === "function" && event.canIntercept) {
-          event.intercept({ handler: function () { return Promise.resolve(); } });
-        } else if (typeof event.preventDefault === "function") {
+        if (typeof event.preventDefault === "function" && event.cancelable !== false) {
           event.preventDefault();
         }
-        window.location.assign(rewritten);
+        navigationRedirecting = true;
+        setTimeout(function () {
+          try {
+            window.location.assign(rewritten);
+          } finally {
+            setTimeout(function () { navigationRedirecting = false; }, 500);
+          }
+        }, 0);
       }, true);
     } catch (_e) {}
   }
