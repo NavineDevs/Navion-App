@@ -28,8 +28,8 @@
       <p class="nv-muted">Enter a URL or search from the top bar.</p>
       <p class="nv-credits">Company: Navine · Lead Dev: HitBoyXx23</p>
       <div class="nv-actions">
-        <a class="nv-btn" href="/nv/aHR0cHMlM0ElMkYlMkZ3d3cueW91dHViZS5jb20">Open YouTube</a>
-        <a class="nv-btn" href="/nv/aHR0cHMlM0ElMkYlMkZkdWNrZHVja2dvLmNvbQ">Open DuckDuckGo</a>
+        <a class="nv-btn" href="/nv/aHR0cHMlM0ElMkYlMkZ3d3cueW91dHViZS5jb20" data-navion-open>Open YouTube</a>
+        <a class="nv-btn" href="/nv/aHR0cHMlM0ElMkYlMkZkdWNrZHVja2dvLmNvbQ" data-navion-open>Open DuckDuckGo</a>
       </div>
       <div class="nv-links">
         <a href="https://github.com/NavineDevs/Navion" target="_blank" rel="noopener noreferrer">Core Repo</a>
@@ -38,5 +38,23 @@
       </div>
     </div>
   </div>
+  <script>
+    !function () {
+      document.addEventListener("click", function (event) {
+        var link = event.target && event.target.closest && event.target.closest("[data-navion-open]");
+        if (!link) return;
+        var href = link.getAttribute("href");
+        if (!href) return;
+        event.preventDefault();
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: "navion-open-tab", url: href }, window.location.origin);
+            return;
+          }
+        } catch (e) {}
+        window.location.href = href;
+      });
+    }();
+  </script>
 </body>
 </html>

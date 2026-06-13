@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Navion Browser</title>
-  <script src="/nv.register.js?v=4.2.18"></script>
+  <script src="/nv.register.js?v=4.2.42"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -137,9 +137,36 @@
           var parsed = new URL(rawHref, window.location.origin);
           if (parsed.origin !== window.location.origin) return "";
           if (parsed.pathname.indexOf("/nv/") !== 0) return "";
-          var encoded = parsed.pathname.slice(4).split("?")[0].split("#")[0];
-          var decoded = nvDecode(encoded);
-          return /^https?:\/\//i.test(decoded) ? decoded : "";
+          var rawPath = parsed.pathname.slice(4);
+          var slash = rawPath.indexOf("/");
+          var rawToken = slash < 0 ? rawPath : rawPath.slice(0, slash);
+          var suffix = slash < 0 ? "" : rawPath.slice(slash);
+          if (!suffix) {
+            var markers = ["dist/", "_next/", "country.json", "duckchat/"];
+            for (var i = 0; i < markers.length; i++) {
+              var index = rawPath.indexOf(markers[i]);
+              if (index > 0) {
+                rawToken = rawPath.slice(0, index);
+                suffix = "/" + rawPath.slice(index);
+                break;
+              }
+            }
+          }
+          try { rawToken = decodeURIComponent(rawToken); } catch (x0) {}
+          var decoded = /^https?:\/\//i.test(rawToken) ? rawToken : nvDecode(rawToken);
+          if (!/^https?:\/\//i.test(decoded)) return "";
+          var target = new URL(decoded);
+          if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
+          if (parsed.search) target.search = parsed.search;
+          if (parsed.hash) target.hash = parsed.hash;
+          if ((target.hostname === "duckduckgo.com" || target.hostname === "www.duckduckgo.com" || target.hostname === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0)) {
+            var ai = new URL("https://duck.ai/");
+            ai.pathname = target.pathname === "/ai" ? "/" : target.pathname.slice(3) || "/";
+            ai.search = target.search;
+            ai.hash = target.hash;
+            return ai.href;
+          }
+          return target.href;
         } catch (e) {
           return "";
         }
@@ -147,6 +174,8 @@
       function nvNormalize(s) {
         s = s.trim();
         if (!s) return null;
+        var decodedProxy = nvDecodeProxyUrl(s);
+        if (decodedProxy) return decodedProxy;
         var lower = s.toLowerCase();
         if (lower === "nav://home") return "nav://home";
         if (lower === "nav://error" || lower === "nav://error.html") return "nav://error";
@@ -243,6 +272,22 @@
           tab.url = "nav://home";
           tab.src = "/nav/home";
           tab.label = nvDisplayLabel(tab.url);
+          return tab;
+        }
+        if (
+          typeof tab.src === "string" &&
+          tab.src.charAt(0) === "/" &&
+          tab.src.indexOf("/nv/") !== 0 &&
+          tab.src.indexOf("/nav/") !== 0 &&
+          typeof tab.url === "string" &&
+          /^https?:\/\//i.test(tab.url)
+        ) {
+          try {
+            var repairedTarget = new URL(tab.src, tab.url).href;
+            tab.url = repairedTarget;
+            tab.src = nvToProxy(repairedTarget);
+            tab.label = nvDisplayLabel(tab.url);
+          } catch (e) {}
         }
         return tab;
       }
@@ -284,7 +329,7 @@
               if (activeAuthTab) {
                 activeAuthTab.src = authProxy;
                 nvSetTabUrl(activeAuthTab, authTarget);
-                nvFrame.src = authProxy;
+                nvSetFrameSource(authProxy);
                 nvRenderTabs();
                 nvSyncUi(activeAuthTab);
                 nvSaveState();
@@ -345,7 +390,7 @@
         tab.url = "nav://error";
         tab.src = target;
         tab.label = nvDisplayLabel(tab.url);
-        nvFrame.src = target;
+        nvSetFrameSource(target);
         nvRenderTabs();
         nvSyncUi(tab);
         nvSaveState();
@@ -386,7 +431,7 @@
               var safeSrc = nvNormalizeFrameSrc(tab.src || "", tab.url);
               if (safeSrc && safeSrc.indexOf("/nv/") === 0) {
                 tab.src = safeSrc;
-                nvFrame.src = safeSrc;
+                nvSetFrameSource(safeSrc);
                 nvSaveState();
               }
               return;
@@ -398,12 +443,25 @@
             var forcedProxy = nvNormalizeFrameSrc(crossHref, crossHref);
             if (forcedProxy && forcedProxy.indexOf("/nv/") === 0) {
               tab.src = forcedProxy;
-              nvFrame.src = forcedProxy;
+              nvSetFrameSource(forcedProxy);
               nvSaveState();
               return;
             }
           }
         }
+        try {
+          var visibleUrl = new URL(frameSrc, window.location.origin);
+          if (visibleUrl.origin === window.location.origin && tab.src && tab.src.indexOf("/nv/") === 0 && !visibleUrl.pathname.startsWith("/nv/") && !nvIsLocalPath(visibleUrl.pathname)) {
+            var visibleTarget = new URL(visibleUrl.pathname + visibleUrl.search + visibleUrl.hash, tab.url).href;
+            tab.url = visibleTarget;
+            tab.label = nvDisplayLabel(visibleTarget);
+            if (!nvUrlEditing) nvUrl.value = visibleTarget;
+            nvRenderTabs();
+            nvSyncUi(tab);
+            nvSaveState();
+            return;
+          }
+        } catch (visibleError) {}
         var normalizedSrc = nvNormalizeFrameSrc(frameSrc, tab.url);
         if (!normalizedSrc) return;
         nvSyncTabFromProxySrc(tab, normalizedSrc);
@@ -425,7 +483,7 @@
             framePath = "";
           }
           if (!framePath || (!framePath.startsWith("/nv/") && !nvIsLocalPath(framePath))) {
-            nvFrame.src = normalizedSrc;
+            nvSetFrameSource(normalizedSrc);
           }
           nvSaveState();
         }
@@ -478,6 +536,17 @@
       var NV_HISTORY_KEY = "navion-history-v1";
       var NV_HISTORY_MAX = 120;
       var nvHistoryItems = [];
+      var nvPendingFrameSrc = "";
+
+      function nvSetFrameSource(src) {
+        if (!src) return;
+        nvPendingFrameSrc = src;
+        nvFrame.setAttribute("src", "about:blank");
+        setTimeout(function () {
+          if (nvPendingFrameSrc !== src) return;
+          nvFrame.setAttribute("src", src);
+        }, 0);
+      }
 
       function nvFindTab(id) {
         for (var i = 0; i < nvTabsState.length; i++) {
@@ -521,7 +590,7 @@
           if (!nvFindTab(nvActiveTabId)) nvActiveTabId = nvTabsState[0].id;
           var active = nvFindTab(nvActiveTabId);
           nvSanitizeTab(active);
-          nvFrame.src = active.src;
+          nvSetFrameSource(active.src);
           nvRenderTabs();
           nvSyncUi(active);
           return true;
@@ -626,7 +695,7 @@
         nvActiveTabId = id;
         if (nextSrc) tab.src = nextSrc;
         nvSanitizeTab(tab);
-        nvFrame.src = tab.src;
+        nvSetFrameSource(tab.src);
         nvRenderTabs();
         nvSyncUi(tab);
         nvSaveState();
@@ -644,7 +713,7 @@
         nvTabsState.push(tab);
         if (activate !== false) nvActiveTabId = id;
         if (!nvInitialTabCreated) nvInitialTabCreated = true;
-        if (activate !== false) nvFrame.src = tab.src;
+        if (activate !== false) nvSetFrameSource(tab.src);
         nvRenderTabs();
         nvSyncUi(tab);
         nvTrackHistory(url);
@@ -667,7 +736,7 @@
         if (wasActive) {
           var next = nvTabsState[Math.min(idx, nvTabsState.length - 1)];
           nvActiveTabId = next.id;
-          nvFrame.src = next.src;
+          nvSetFrameSource(next.src);
           nvSyncUi(next);
         }
         nvRenderTabs();
@@ -699,21 +768,6 @@
         var n = nvNormalize(raw);
         if (!n) return;
         nvCreateTab(n, nvToProxy(n), true);
-      }
-
-      function nvEnsureHomeMainPage() {
-        var homeTab = null;
-        for (var i = 0; i < nvTabsState.length; i++) {
-          if (nvTabsState[i].url === "nav://home" || nvTabsState[i].src === "/nav/home") {
-            homeTab = nvTabsState[i];
-            break;
-          }
-        }
-        if (homeTab) {
-          nvActivateTab(homeTab.id);
-          return;
-        }
-        nvCreateTab("nav://home", "/nav/home", true);
       }
 
       nvForm.onsubmit = function (e) {
@@ -756,17 +810,26 @@
         }
       });
       setInterval(function () { nvGuardFrameNavigation(); }, 900);
-      nvFrame.addEventListener("load", function () {
+      function nvHandleFrameLoad() {
+        try {
+          if (String(nvFrame.contentWindow.location.href || "") === "about:blank") return;
+        } catch (blankError) {}
         var activeAtLoad = nvFindTab(nvActiveTabId);
         if (activeAtLoad) nvSyncTabFromProxySrc(activeAtLoad, String(nvFrame.getAttribute("src") || nvFrame.src || ""));
+        var expectedSrc = String(nvFrame.getAttribute("src") || "");
+        var expectedPath = "";
+        try {
+          expectedPath = new URL(expectedSrc, window.location.origin).pathname;
+        } catch (e0) {
+          expectedPath = expectedSrc.split("?")[0].split("#")[0];
+        }
         try {
           var path = nvFrame.contentWindow.location.pathname || "";
           var search = nvFrame.contentWindow.location.search || "";
           var hash = nvFrame.contentWindow.location.hash || "";
           var currentUrl = nvFrame.contentWindow.location.href || "";
           if (path.startsWith("/nv/")) {
-            var raw = path.slice(4);
-            var out = nvDecode(raw);
+            var out = nvDecodeProxyUrl(currentUrl);
             var active = nvFindTab(nvActiveTabId);
             if (out && active) {
               active.url = out;
@@ -778,7 +841,7 @@
               nvSaveState();
             }
           }
-          if (path === "/nav/home" || path === "/nav/error") {
+          if ((path === "/nav/home" || path === "/nav/error") && (!expectedPath || expectedPath === path)) {
             var activeNav = nvFindTab(nvActiveTabId);
             if (activeNav) {
               activeNav.url = path === "/nav/home" ? "nav://home" : "nav://error";
@@ -793,19 +856,32 @@
             var tab = nvFindTab(nvActiveTabId);
             if (tab && nvIsShellUrl(currentUrl)) {
               if (tab.src && tab.src.indexOf("/nv/") === 0 && nvFrame.getAttribute("src") !== tab.src) {
-                nvFrame.src = tab.src;
+                nvSetFrameSource(tab.src);
               }
               return;
             }
             if (tab && nvIsBrowserErrorUrl(currentUrl)) return;
+            if (tab && expectedPath && expectedPath.indexOf("/nv/") === 0 && !path.startsWith("/nv/") && !nvIsLocalPath(path)) {
+              try {
+                var maskedUrl = new URL(path + search + hash, tab.url).href;
+                tab.url = maskedUrl;
+                tab.label = nvDisplayLabel(maskedUrl);
+                if (!nvUrlEditing) nvUrl.value = maskedUrl;
+                nvRenderTabs();
+                nvSyncUi(tab);
+                nvTrackHistory(maskedUrl);
+                nvSaveState();
+                return;
+              } catch (maskedError) {}
+            }
             if (tab && currentUrl !== tab.src) {
               var normalizedSrc = nvNormalizeFrameSrc(currentUrl, tab.url);
               if (normalizedSrc) {
                 tab.src = normalizedSrc;
-                if (!nvIsLocalPath(path)) {
+                if (!nvIsLocalPath(path) && !(expectedPath && expectedPath.indexOf("/nv/") === 0)) {
                   var frameAttr = String(nvFrame.getAttribute("src") || "");
                   if (nvCanonicalFramePath(frameAttr) !== normalizedSrc) {
-                    nvFrame.src = normalizedSrc;
+                    nvSetFrameSource(normalizedSrc);
                     nvSaveState();
                     return;
                   }
@@ -835,15 +911,15 @@
           }
           var restoreSrc = nvNormalizeFrameSrc(crossTab.src || "", crossTab.url);
           if (restoreSrc && nvFrame.getAttribute("src") !== restoreSrc) {
-            nvFrame.src = restoreSrc;
+            nvSetFrameSource(restoreSrc);
             nvSaveState();
           }
         }
-      });
+      }
+      nvFrame.addEventListener("load", nvHandleFrameLoad);
       nvLoadHistory();
       nvRenderSuggestions();
       if (!nvLoadState()) nvCreateTab("nav://home", "/nav/home", true);
-      nvEnsureHomeMainPage();
     }();
   </script>
 </body>

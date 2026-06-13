@@ -12,5 +12,7 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "navion": "file:../Navion"
+  }
 }

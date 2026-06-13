@@ -4,7 +4,7 @@ UI shell project that runs separately from `Navion` core.
 
 ## What this project is
 
-`Navion-App` provides the app-facing layer and reuses core logic from `../Navion`:
+`Navion-App` provides the app-facing layer and reuses core logic from the `navion` dependency:
 - Browser shell/UI routes
 - `/nv/*` gateway entry + URL/base tracking cookies
 - Delegation to NAVION core proxy handler
@@ -35,7 +35,7 @@ Navion-App/
 ## Requirements
 
 - Node.js `18+`
-- `../Navion` present (this app imports core modules from it)
+- `../Navion` present for local dependency installs
 
 ## Run
 
@@ -71,4 +71,28 @@ Use the shell as a thin layer and keep custom logic in your own modules:
 2. Keep app-only helpers in `Navion-App` (routing, UI-shell behavior, status endpoints).
 3. Prefer native Node APIs (`http`, `fs`, `path`, `url`) and browser APIs.
 4. If you need a "library feature", implement a focused internal utility file instead of installing a package.
-5. Reuse your own helper from both projects to become your own maintained dependency.
+5. Export shared helpers from `Navion/package.json` and import them from `navion`.
+
+## Use Navion Core as the app dependency
+
+`package.json` uses the local core package:
+
+```json
+{
+  "dependencies": {
+    "navion": "file:../Navion"
+  }
+}
+```
+
+Install it from this folder:
+
+```bash
+npm install
+```
+
+Then app code can import core features:
+
+```js
+import { handleProxy, encode, decode } from "navion";
+```

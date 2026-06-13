@@ -1,18 +1,24 @@
 const PROXY_ENDPOINT = "/api/fetch";
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.18";
+const CACHE_NAME = "navion-runtime-v4.2.42";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js",
-  "/nv.register.js",
+  "/nv.client.js?v=4.2.42",
+  "/nv.register.js?v=4.2.42",
   "/nav/home",
   "/nav/error",
 ];
 const PASSTHROUGH = new Set([
+  "/",
+  "/app",
+  "/index.html",
+  "/favicon.ico",
+  "/logo.png",
   "/nv.sw.js",
   "/nv.client.js",
   "/nv.register.js",
   "/api/fetch",
+  "/api/navion-status",
   "/generate_204",
   "/nav/home",
   "/nav/error",
@@ -81,18 +87,21 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  if (request.method !== "GET" || !RUNTIME_ASSETS.includes(url.pathname)) {
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=4.2.42" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=4.2.42" :
+    url.pathname;
+  if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
   }
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(url.pathname);
+  const cached = await cache.match(cacheKey);
   if (cached) return cached;
   try {
     const response = await fetch(request);
-    if (response && response.ok) await cache.put(url.pathname, response.clone());
+    if (response && response.ok) await cache.put(cacheKey, response.clone());
     return response;
   } catch (err) {
-    const fallback = await cache.match(url.pathname);
+    const fallback = await cache.match(cacheKey);
     if (fallback) return fallback;
     const empty = emptyAssetResponse(request);
     if (empty) return empty;
@@ -101,6 +110,9 @@ async function handleLocalRequest(request, url) {
 }
 
 async function handleCrossOriginRequest(request, requestUrl) {
+  if (shouldUseDirectCrossOrigin(requestUrl)) {
+    return safeFetch(request);
+  }
   if (isDroppedTelemetryUrl(requestUrl)) {
     return new Response(null, {
       status: 204,
@@ -148,6 +160,55 @@ function swDecode(encoded) {
   }
 }
 
+function shouldUseDirectCrossOrigin(url) {
+  const host = String(url.hostname || "").toLowerCase();
+  return (
+    host === "api.jikan.moe" ||
+    host === "cdn.myanimelist.net" ||
+    host.endsWith(".myanimelist.net")
+  );
+}
+
+function decodeNestedUrl(value) {
+  if (!value) return null;
+  let out = String(value).replace(/(?:&amp;|&)rut=[^&]+$/i, "").replace(/&amp;/g, "&");
+  for (let i = 0; i < 4; i++) {
+    try {
+      const next = decodeURIComponent(out);
+      if (next === out) break;
+      out = next.replace(/(?:&amp;|&)rut=[^&]+$/i, "").replace(/&amp;/g, "&");
+    } catch {
+      break;
+    }
+  }
+  return /^https?:\/\//i.test(out) ? out : null;
+}
+
+function normalizeTargetUrl(target) {
+  try {
+    const targetUrl = new URL(target);
+    const host = targetUrl.hostname.toLowerCase();
+    if (
+      (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
+      (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/"))
+    ) {
+      const aiUrl = new URL("https://duck.ai/");
+      aiUrl.pathname = targetUrl.pathname === "/ai" ? "/" : targetUrl.pathname.slice(3) || "/";
+      aiUrl.search = targetUrl.search;
+      aiUrl.hash = targetUrl.hash;
+      return aiUrl.href;
+    }
+    if (
+      (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
+      targetUrl.pathname === "/l/"
+    ) {
+      const destination = decodeNestedUrl(targetUrl.searchParams.get("uddg"));
+      if (destination) return destination;
+    }
+  } catch {}
+  return target;
+}
+
 function decodeNavionPath(pathname) {
   if (!pathname.startsWith(NAVION_PREFIX)) return null;
   const rawPath = pathname.slice(NAVION_PREFIX.length).split("/")[0];
@@ -172,8 +233,13 @@ function isDroppedTelemetryUrl(url) {
   );
 }
 
-function resolveKnownAssetTarget(url) {
+function resolveKnownAssetTarget(url, baseUrl) {
   const path = String(url.pathname || "");
+  if (baseUrl && (path.startsWith("/_next/") || path.startsWith("/assets/") || path.startsWith("/static/"))) {
+    try {
+      return new URL(path + url.search + url.hash, baseUrl).href;
+    } catch {}
+  }
   if (
     path.startsWith("/dist/duckai-dist/") ||
     path.startsWith("/dist/locale/") ||
@@ -257,6 +323,8 @@ async function resolveBaseUrl(event) {
       const ref = new URL(event.request.referrer);
       if (ref.origin === self.location.origin) {
         const fromReferrer = decodeNavionPath(ref.pathname);
+        const fromReferrerUrl = resolveTargetFromNavionUrl(ref);
+        if (fromReferrerUrl) return fromReferrerUrl;
         if (fromReferrer) return fromReferrer;
       }
     } catch {}
@@ -269,6 +337,8 @@ async function resolveBaseUrl(event) {
         const cu = new URL(client.url);
         if (cu.origin === self.location.origin) {
           const fromClient = decodeNavionPath(cu.pathname);
+          const fromClientUrl = resolveTargetFromNavionUrl(cu);
+          if (fromClientUrl) return fromClientUrl;
           if (fromClient) return fromClient;
         }
       }
@@ -336,7 +406,8 @@ async function handleNonNavionRequest(event, requestUrl) {
       headers: { "Cache-Control": "no-store" },
     });
   }
-  const knownAssetTarget = resolveKnownAssetTarget(requestUrl);
+  const baseUrl = await resolveBaseUrl(event);
+  const knownAssetTarget = resolveKnownAssetTarget(requestUrl, baseUrl);
   if (knownAssetTarget) {
     const encoded = swEncode(knownAssetTarget);
     if (encoded) {
@@ -356,7 +427,6 @@ async function handleNonNavionRequest(event, requestUrl) {
     return safeFetch(event.request);
   }
 
-  const baseUrl = await resolveBaseUrl(event);
   if (
     (requestUrl.pathname === "/" || requestUrl.pathname === "/index.html") &&
     !baseUrl
@@ -506,6 +576,7 @@ async function handleRequest(event) {
   if (!targetUrl) {
     return errorResponse("Missing URL", "No URL was provided to proxy.", 400);
   }
+  targetUrl = normalizeTargetUrl(targetUrl);
   const encoded = swEncode(targetUrl);
 
   if (!encoded) {

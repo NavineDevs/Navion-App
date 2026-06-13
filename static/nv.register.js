@@ -1,12 +1,5 @@
 (function () {
   if (!navigator.serviceWorker) return;
-  var reloading = false;
-
-  function reloadOnce() {
-    if (reloading) return;
-    reloading = true;
-    window.location.reload();
-  }
 
   function registerNavionSw() {
     return navigator.serviceWorker.register("/nv.sw.js", {
@@ -23,19 +16,13 @@
           if (worker.state !== "installed") return;
           if (navigator.serviceWorker.controller) {
             try { worker.postMessage({ type: "NV_SKIP_WAITING" }); } catch (e) {}
-            return;
           }
-          reloadOnce();
         });
       });
       console.log("[Navion] Service Worker registered");
       return registration;
     });
   }
-
-  navigator.serviceWorker.addEventListener("controllerchange", function () {
-    reloadOnce();
-  });
 
   navigator.serviceWorker.getRegistration("/")
     .then(function (existing) {
@@ -44,7 +31,8 @@
         if (existing.waiting) {
           try { existing.waiting.postMessage({ type: "NV_SKIP_WAITING" }); } catch (e) {}
         }
-        return existing.update().then(registerNavionSw);
+        existing.update().catch(function () {});
+        return existing;
       }
       return existing.unregister().then(registerNavionSw);
     })

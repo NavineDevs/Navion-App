@@ -30,7 +30,6 @@
       <code class="nv-status" id="nvErrorCode"><strong>Code:</strong> NAVION_ROUTE_ERROR</code>
       <div class="nv-actions">
         <a class="nv-btn" id="nvRetry" href="/nav/home">Retry proxied page</a>
-        <button class="nv-btn nv-btn-alt" id="nvRegisterSw" type="button">Register Service Worker</button>
         <a class="nv-btn nv-btn-alt" href="/">Go to Navion Home</a>
       </div>
       <div class="nv-status" id="nvStatus"><strong>Status:</strong> Checking core availability...</div>
@@ -44,6 +43,16 @@
   </div>
   <script>
     (function () {
+      if (navigator.serviceWorker) {
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+          for (var i = 0; i < registrations.length; i++) {
+            var worker = registrations[i].active || registrations[i].waiting || registrations[i].installing;
+            var url = worker && worker.scriptURL || "";
+            if (url.indexOf("/nv.sw.js") !== -1) registrations[i].unregister();
+          }
+        }).catch(function () {});
+      }
+
       function getParams() {
         try { return new URLSearchParams(window.location.search || ""); } catch (e) { return new URLSearchParams(); }
       }
@@ -106,19 +115,6 @@
           window.location.href = retryHref;
         });
       }
-      var swBtn = document.getElementById("nvRegisterSw");
-      if (swBtn) {
-        swBtn.addEventListener("click", function () {
-          if (!("serviceWorker" in navigator)) {
-            setCoreStatus("Service workers are not supported in this browser.");
-            return;
-          }
-          navigator.serviceWorker.register("/nv.sw.js", { scope: "/" })
-            .then(function () { setCoreStatus("Service worker registered. Retry now."); })
-            .catch(function (err) { setCoreStatus("Service worker registration failed: " + (err && err.message ? err.message : "unknown")); });
-        });
-      }
-
       setErrorInfo();
       if (navigator && navigator.onLine === false) {
         setCoreStatus("Browser offline. Reconnect, then retry.");

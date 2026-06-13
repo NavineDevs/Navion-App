@@ -2,14 +2,16 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { handleProxy } from "../Navion/src/proxy.js";
-import { decode, encode } from "../Navion/src/rewriters/url.js";
+import { handleProxy, decode, encode } from "navion";
 import { NAVION_APP_LOCAL_ASSET_PATHS } from "./src/config/routes.js";
 import { NAVION_APP_CONFIG } from "./src/config/app.config.js";
 import { getNavionAppRuntime } from "./src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_STATIC = path.join(__dirname, "static");
+const NAVION_PREFIX = "/nv/";
+const DEFAULT_DUCK_AI_ORIGIN = "https://duck.ai/";
+const DEFAULT_DUCKDUCKGO_ORIGIN = "https://duckduckgo.com/";
 
 const MIMES = {
   ".html": "text/html; charset=utf-8",
@@ -49,17 +51,35 @@ function parseCookies(headerValue) {
   return out;
 }
 
+function decodeNavionValue(value) {
+  if (!value) return null;
+  try {
+    const decoded = decode(value);
+    return /^https?:\/\//i.test(decoded) ? decoded : null;
+  } catch {
+    return /^https?:\/\//i.test(value) ? value : null;
+  }
+}
+
 function resolveBaseFromPath(pathname) {
-  if (!pathname || !pathname.startsWith("/nv/")) return null;
-  const raw = decodeURIComponent(pathname.slice("/nv/".length).split("/")[0]);
+  if (!pathname || !pathname.startsWith(NAVION_PREFIX)) return null;
+  try {
+    const target = resolveTargetFromNavionPath(pathname, "");
+    if (target) return new URL(target).origin + "/";
+  } catch {}
+  let raw = "";
+  try {
+    raw = decodeURIComponent(pathname.slice(NAVION_PREFIX.length).split("/")[0]);
+  } catch {
+    return null;
+  }
   if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return decode(raw);
+  return decodeNavionValue(raw);
 }
 
 function resolveTargetFromNavionPath(pathname, search) {
-  if (!pathname || !pathname.startsWith("/nv/")) return null;
-  const rawPath = pathname.slice("/nv/".length);
+  if (!pathname || !pathname.startsWith(NAVION_PREFIX)) return null;
+  const rawPath = pathname.slice(NAVION_PREFIX.length);
   if (!rawPath) return null;
   const slash = rawPath.indexOf("/");
   let rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
@@ -76,7 +96,8 @@ function resolveTargetFromNavionPath(pathname, search) {
     }
   }
   const token = decodeURIComponent(rawToken);
-  const base = /^https?:\/\//i.test(token) ? token : decode(token);
+  const base = decodeNavionValue(token);
+  if (!base) return null;
   const target = new URL(base);
   if (suffix) {
     target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
@@ -86,8 +107,8 @@ function resolveTargetFromNavionPath(pathname, search) {
 }
 
 function resolveRelativeTargetFromNavionPath(pathname, search, baseTarget) {
-  if (!pathname || !pathname.startsWith("/nv/") || !baseTarget) return null;
-  const rawPath = pathname.slice("/nv/".length);
+  if (!pathname || !pathname.startsWith(NAVION_PREFIX) || !baseTarget) return null;
+  const rawPath = pathname.slice(NAVION_PREFIX.length);
   if (!rawPath) return null;
   return new URL(rawPath + (search || ""), baseTarget).href;
 }
@@ -97,6 +118,7 @@ function serveFile(res, filePath) {
   const mime = MIMES[ext] || "application/octet-stream";
   res.setHeader("Content-Type", mime);
   res.setHeader("Cache-Control", "no-store");
+  if (path.basename(filePath) === "nv.sw.js") res.setHeader("Service-Worker-Allowed", "/");
   const stream = fs.createReadStream(filePath);
   stream.on("error", () => {
     if (!res.headersSent) {
@@ -118,21 +140,26 @@ function isDroppedTelemetryUrl(url) {
   );
 }
 
-function resolveKnownAssetTarget(pathname, search) {
+function resolveKnownAssetTarget(pathname, search, baseTarget) {
   const pathValue = String(pathname || "");
+  if (baseTarget && (pathValue.startsWith("/_next/") || pathValue.startsWith("/assets/") || pathValue.startsWith("/static/"))) {
+    try {
+      return new URL(pathValue + (search || ""), baseTarget).href;
+    } catch {}
+  }
   if (
     pathValue.startsWith("/dist/duckai-dist/") ||
     pathValue.startsWith("/dist/locale/") ||
     pathValue === "/country.json" ||
     pathValue.startsWith("/duckchat/")
   ) {
-    return new URL(pathValue + (search || ""), "https://duck.ai/").href;
+    return new URL(pathValue + (search || ""), DEFAULT_DUCK_AI_ORIGIN).href;
   }
   if (pathValue.startsWith("/_next/")) {
-    return new URL(pathValue + (search || ""), "https://duckduckgo.com/").href;
+    return new URL(pathValue + (search || ""), DEFAULT_DUCKDUCKGO_ORIGIN).href;
   }
   if (pathValue.startsWith("/dist/")) {
-    return new URL(pathValue + (search || ""), "https://duckduckgo.com/").href;
+    return new URL(pathValue + (search || ""), DEFAULT_DUCKDUCKGO_ORIGIN).href;
   }
   return null;
 }
@@ -146,6 +173,59 @@ function findStaticFile(reqPath) {
 
 function requestOrigin(req) {
   return `http://${req.headers.host}`;
+}
+
+function decodeNestedUrl(value) {
+  if (!value) return null;
+  let out = String(value).replace(/(?:&amp;|&)rut=[^&]+$/i, "").replace(/&amp;/g, "&");
+  for (let i = 0; i < 4; i++) {
+    try {
+      const next = decodeURIComponent(out);
+      if (next === out) break;
+      out = next.replace(/(?:&amp;|&)rut=[^&]+$/i, "").replace(/&amp;/g, "&");
+    } catch {
+      break;
+    }
+  }
+  return /^https?:\/\//i.test(out) ? out : null;
+}
+
+function normalizeProxyTarget(target) {
+  try {
+    const targetUrl = new URL(target);
+    const host = targetUrl.hostname.toLowerCase();
+    if (
+      (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
+      (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/"))
+    ) {
+      const aiUrl = new URL(DEFAULT_DUCK_AI_ORIGIN);
+      aiUrl.pathname = targetUrl.pathname === "/ai" ? "/" : targetUrl.pathname.slice(3) || "/";
+      aiUrl.search = targetUrl.search;
+      aiUrl.hash = targetUrl.hash;
+      return aiUrl.href;
+    }
+    if (
+      (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
+      targetUrl.pathname === "/l/"
+    ) {
+      const destination = decodeNestedUrl(targetUrl.searchParams.get("uddg"));
+      if (destination) return destination;
+    }
+    if (
+      (host === "duckduckgo.com" || host === "www.duckduckgo.com") &&
+      (targetUrl.pathname === "/" || targetUrl.pathname === "") &&
+      targetUrl.searchParams.get("q")
+    ) {
+      const htmlUrl = new URL("https://html.duckduckgo.com/html/");
+      const keep = ["q", "kl", "kp", "k1", "kz", "df"];
+      for (const name of keep) {
+        const value = targetUrl.searchParams.get(name);
+        if (value !== null) htmlUrl.searchParams.set(name, value);
+      }
+      return htmlUrl.href;
+    }
+  } catch {}
+  return target;
 }
 
 function resolveBaseContext(req) {
@@ -167,17 +247,34 @@ function resolveBaseContext(req) {
     try {
       const cookies = parseCookies(req.headers.cookie || "");
       if (cookies.nv_base) {
-        const decodedBase = decode(cookies.nv_base);
-        if (/^https?:\/\//i.test(decodedBase)) baseTarget = decodedBase;
+        baseTarget = decodeNavionValue(cookies.nv_base);
       }
       if (!baseTarget && cookies.nv_origin) {
-        const decodedOrigin = decode(cookies.nv_origin);
+        const decodedOrigin = decodeNavionValue(cookies.nv_origin);
         if (/^https?:\/\//i.test(decodedOrigin)) baseTarget = decodedOrigin + "/";
       }
     } catch {}
   }
 
   return { baseTarget, fromProxyReferer };
+}
+
+function proxyTarget(req, res, target) {
+  const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
+  proxyUrl.searchParams.set("url", encode(normalizeProxyTarget(target)));
+  return handleProxy(req, res, proxyUrl);
+}
+
+function setBaseCookies(res, target) {
+  try {
+    const targetOrigin = new URL(target).origin;
+    const stableBase = encode(targetOrigin + "/");
+    const stableOrigin = encode(targetOrigin);
+    res.setHeader("Set-Cookie", [
+      `nv_base=${stableBase}; Path=/; SameSite=Lax; Max-Age=2592000`,
+      `nv_origin=${stableOrigin}; Path=/; SameSite=Lax; Max-Age=2592000`,
+    ]);
+  } catch {}
 }
 
 const server = http.createServer(async (req, res) => {
@@ -208,8 +305,13 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/favicon.ico") {
     const iconPath = path.join(APP_STATIC, "logo.png");
     if (fs.existsSync(iconPath)) return serveFile(res, iconPath);
-    res.writeHead(204, { "Cache-Control": "no-store" });
-    res.end();
+    const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1a1f36"/><path d="M16 46V18h8l16 18V18h8v28h-8L24 28v18z" fill="#b8c4ff"/></svg>`;
+    res.writeHead(200, {
+      "Cache-Control": "no-store",
+      "Content-Type": "image/svg+xml; charset=utf-8",
+      "Content-Length": Buffer.byteLength(icon),
+    });
+    res.end(icon);
     return;
   }
 
@@ -224,31 +326,14 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/nav/home") return serveFile(res, path.join(APP_STATIC, "nav.home.html"));
   if (url.pathname === "/nav/error") return serveFile(res, path.join(APP_STATIC, "nav.error.html"));
 
-  const knownAssetTarget = resolveKnownAssetTarget(url.pathname, url.search);
+  const knownAssetTarget = resolveKnownAssetTarget(url.pathname, url.search, baseContext.baseTarget);
   if (knownAssetTarget) {
-    const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
-    proxyUrl.searchParams.set("url", encode(knownAssetTarget));
-    return handleProxy(req, res, proxyUrl);
+    return proxyTarget(req, res, knownAssetTarget);
   }
 
-  if (url.pathname.startsWith("/nv/")) {
-    let baseTarget = null;
-    const referer = req.headers.referer || "";
-    if (referer) {
-      try {
-        const refUrl = new URL(referer);
-        if (refUrl.origin === `http://${req.headers.host}`) baseTarget = resolveBaseFromPath(refUrl.pathname);
-      } catch {}
-    }
-    if (!baseTarget) {
-      try {
-        const cookies = parseCookies(req.headers.cookie || "");
-        if (cookies.nv_base) {
-          const decodedBase = decode(cookies.nv_base);
-          if (/^https?:\/\//i.test(decodedBase)) baseTarget = decodedBase;
-        }
-      } catch {}
-    }
+  if (url.pathname.startsWith(NAVION_PREFIX)) {
+    const { baseTarget } = baseContext;
+    const rawNavionPath = url.pathname.slice(NAVION_PREFIX.length);
     let target = null;
     try { target = resolveTargetFromNavionPath(url.pathname, url.search); } catch {}
     if (!target) {
@@ -259,16 +344,7 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
-    try {
-      const targetOrigin = new URL(target).origin;
-      const stableBase = encode(targetOrigin + "/");
-      const stableOrigin = encode(targetOrigin);
-      res.setHeader("Set-Cookie", [
-        `nv_base=${stableBase}; Path=/; SameSite=Lax; Max-Age=2592000`,
-        `nv_origin=${stableOrigin}; Path=/; SameSite=Lax; Max-Age=2592000`,
-      ]);
-    } catch {}
-    const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
+    setBaseCookies(res, target);
     try {
       if (isDroppedTelemetryUrl(new URL(target))) {
         res.writeHead(204, { "Cache-Control": "no-store" });
@@ -276,8 +352,20 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     } catch {}
-    proxyUrl.searchParams.set("url", encode(target));
-    return handleProxy(req, res, proxyUrl);
+    try {
+      const accept = String(req.headers.accept || "").toLowerCase();
+      const targetUrl = new URL(target);
+      const suffix = targetUrl.pathname + targetUrl.search + targetUrl.hash;
+      if (!rawNavionPath.includes("/") && suffix !== "/" && accept.includes("text/html")) {
+        res.writeHead(302, {
+          Location: NAVION_PREFIX + encode(targetUrl.origin + "/") + suffix,
+          "Cache-Control": "no-store",
+        });
+        res.end();
+        return;
+      }
+    } catch {}
+    return proxyTarget(req, res, target);
   }
 
   if (url.pathname === "/nv") {
@@ -296,6 +384,19 @@ const server = http.createServer(async (req, res) => {
 
   const isRootShellPath = url.pathname === "/" || isShellAssetRequest;
 
+  if (baseTarget && fromProxyReferer && isRootShellPath) {
+    try {
+      const target = new URL(url.pathname + url.search + url.hash, baseTarget).href;
+      const accept = String(req.headers.accept || "").toLowerCase();
+      if (req.headers["sec-fetch-dest"] === "document" || accept.includes("text/html")) {
+        res.writeHead(302, { Location: NAVION_PREFIX + encode(target) });
+        res.end();
+        return;
+      }
+      return proxyTarget(req, res, target);
+    } catch {}
+  }
+
   if (isRootShellPath) {
     const shellFile = path.join(APP_STATIC, "index.html");
     return serveFile(res, shellFile);
@@ -304,9 +405,7 @@ const server = http.createServer(async (req, res) => {
   if (baseTarget && !NAVION_APP_LOCAL_ASSET_PATHS.has(url.pathname)) {
     try {
       const target = new URL(url.pathname + url.search + url.hash, baseTarget).href;
-      const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
-      proxyUrl.searchParams.set("url", encode(target));
-      return handleProxy(req, res, proxyUrl);
+      return proxyTarget(req, res, target);
     } catch {}
   }
 
