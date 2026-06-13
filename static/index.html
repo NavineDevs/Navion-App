@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Navion Browser</title>
+  <script>
+    if (window.top !== window) {
+      window.location.replace("/nav/home");
+    }
+  </script>
   <script src="/nv.register.js?v=4.2.42"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
