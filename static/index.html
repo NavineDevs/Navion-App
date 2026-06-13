@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=4.2.43"></script>
+  <script src="/nv.register.js?v=4.2.44"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -164,7 +164,7 @@
           if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
           if (parsed.search) target.search = parsed.search;
           if (parsed.hash) target.hash = parsed.hash;
-          if ((target.hostname === "duckduckgo.com" || target.hostname === "www.duckduckgo.com" || target.hostname === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0)) {
+          if ((target.hostname === "duckduckgo.com" || target.hostname === "www.duckduckgo.com" || target.hostname === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0 || target.searchParams.get("duckai") === "1" || target.searchParams.get("ia") === "chat" || target.searchParams.get("iax") === "chat")) {
             var ai = new URL("https://duck.ai/");
             ai.pathname = target.pathname === "/ai" ? "/" : target.pathname.slice(3) || "/";
             ai.search = target.search;
@@ -195,7 +195,7 @@
           return "https://duckduckgo.com/?q=" + encodeURIComponent(dQuery);
         }
         if (/^https?:\/\//i.test(s)) {
-          try { new URL(s); return s; } catch (e) {}
+          try { return nvDecodeProxyUrl(nvToProxy(s)) || s; } catch (e) {}
           return null;
         }
         if (/\.|^localhost(:\d+)?$/.test(s)) {

@@ -6,7 +6,7 @@
   var lightMode = mode === "youtube" || mode === "lite" || passiveMode;
   var navigationRedirecting = false;
 
-  var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1 };
+  var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1, "data-src": 1, "data-href": 1, "data-url": 1, "data-original": 1, "data-lazy-src": 1, "data-iframe-src": 1, "data-video": 1, "data-file": 1, "data-stream": 1, "data-source": 1, "data-mp4": 1, "data-webm": 1, "data-hls": 1, "data-m3u8": 1, "data-player": 1, "data-embed": 1 };
   var LOCAL_ALLOW = {
     "/api/fetch": 1,
     "/api/navion-status": 1,
@@ -74,7 +74,7 @@
       if (search) target.search = search;
       if (hash) target.hash = hash;
       var host = target.hostname.toLowerCase();
-      if ((host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0)) {
+      if ((host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0 || target.searchParams.get("duckai") === "1" || target.searchParams.get("ia") === "chat" || target.searchParams.get("iax") === "chat")) {
         var ai = new URL("https://duck.ai/");
         ai.pathname = target.pathname === "/ai" ? "/" : target.pathname.slice(3) || "/";
         ai.search = target.search;
@@ -126,7 +126,7 @@
       }
     }
     if (node.querySelectorAll) {
-      var list = node.querySelectorAll("[href],[src],[action],[formaction],[poster]");
+      var list = node.querySelectorAll("[href],[src],[action],[formaction],[poster],[data-src],[data-href],[data-url],[data-original],[data-lazy-src],[data-iframe-src],[data-video],[data-file],[data-stream],[data-source],[data-mp4],[data-webm],[data-hls],[data-m3u8],[data-player],[data-embed]");
       for (var j = 0; j < list.length; j++) rewriteNodeAttrs(list[j]);
     }
   }
@@ -178,10 +178,14 @@
 
   function patchWindowOpen() {
     if (typeof window.open !== "function") return;
-    var nativeOpen = window.open;
     window.open = function (url, target, features) {
-      if (typeof url === "string") url = rewriteUrl(url);
-      return nativeOpen.call(window, url, target, features);
+      if (typeof url !== "string" || !url.trim()) return null;
+      var rewritten = rewriteUrl(url);
+      var normalizedTarget = String(target || "").toLowerCase();
+      if (normalizedTarget === "_self" || normalizedTarget === "_top" || normalizedTarget === "_parent") {
+        window.location.assign(rewritten);
+      }
+      return null;
     };
   }
 
@@ -206,6 +210,7 @@
       var href = el.getAttribute("href");
       if (!href || href.indexOf("javascript:") === 0 || href.indexOf("#") === 0) return;
       var rewritten = rewriteUrl(href);
+      if (el.getAttribute("target")) el.setAttribute("target", "_self");
       if (rewritten !== href) {
         event.preventDefault();
         window.location.assign(rewritten);
@@ -271,7 +276,7 @@
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["href", "src", "action", "formaction", "poster"]
+      attributeFilter: ["href", "src", "action", "formaction", "poster", "data-src", "data-href", "data-url", "data-original", "data-lazy-src", "data-iframe-src", "data-video", "data-file", "data-stream", "data-source", "data-mp4", "data-webm", "data-hls", "data-m3u8", "data-player", "data-embed"]
     });
   }
 
@@ -306,6 +311,9 @@
     var pairs = [
       [window.HTMLScriptElement && window.HTMLScriptElement.prototype, "src"],
       [window.HTMLImageElement && window.HTMLImageElement.prototype, "src"],
+      [window.HTMLVideoElement && window.HTMLVideoElement.prototype, "src"],
+      [window.HTMLAudioElement && window.HTMLAudioElement.prototype, "src"],
+      [window.HTMLSourceElement && window.HTMLSourceElement.prototype, "src"],
       [window.HTMLIFrameElement && window.HTMLIFrameElement.prototype, "src"],
       [window.HTMLLinkElement && window.HTMLLinkElement.prototype, "href"],
       [window.HTMLAnchorElement && window.HTMLAnchorElement.prototype, "href"],
