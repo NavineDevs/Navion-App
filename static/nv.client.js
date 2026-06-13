@@ -6,7 +6,7 @@
   var lightMode = mode === "youtube" || mode === "lite" || passiveMode;
   var navigationRedirecting = false;
 
-  var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1, "data-src": 1, "data-href": 1, "data-url": 1, "data-original": 1, "data-lazy-src": 1, "data-iframe-src": 1, "data-video": 1, "data-file": 1, "data-stream": 1, "data-source": 1, "data-mp4": 1, "data-webm": 1, "data-hls": 1, "data-m3u8": 1, "data-player": 1, "data-embed": 1 };
+  var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1, "data-src": 1, "data-href": 1, "data-url": 1, "data-original": 1, "data-lazy-src": 1, "data-iframe-src": 1, "data-video": 1, "data-file": 1, "data-stream": 1, "data-source": 1, "data-mp4": 1, "data-webm": 1, "data-hls": 1, "data-m3u8": 1, "data-player": 1, "data-embed": 1, "data-id": 1, "data-link": 1, "data-target": 1 };
   var LOCAL_ALLOW = {
     "/api/fetch": 1,
     "/api/navion-status": 1,
@@ -126,7 +126,7 @@
       }
     }
     if (node.querySelectorAll) {
-      var list = node.querySelectorAll("[href],[src],[action],[formaction],[poster],[data-src],[data-href],[data-url],[data-original],[data-lazy-src],[data-iframe-src],[data-video],[data-file],[data-stream],[data-source],[data-mp4],[data-webm],[data-hls],[data-m3u8],[data-player],[data-embed]");
+      var list = node.querySelectorAll("[href],[src],[action],[formaction],[poster],[data-src],[data-href],[data-url],[data-original],[data-lazy-src],[data-iframe-src],[data-video],[data-file],[data-stream],[data-source],[data-mp4],[data-webm],[data-hls],[data-m3u8],[data-player],[data-embed],[data-id],[data-link],[data-target]");
       for (var j = 0; j < list.length; j++) rewriteNodeAttrs(list[j]);
     }
   }
@@ -276,7 +276,7 @@
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["href", "src", "action", "formaction", "poster", "data-src", "data-href", "data-url", "data-original", "data-lazy-src", "data-iframe-src", "data-video", "data-file", "data-stream", "data-source", "data-mp4", "data-webm", "data-hls", "data-m3u8", "data-player", "data-embed"]
+      attributeFilter: ["href", "src", "action", "formaction", "poster", "data-src", "data-href", "data-url", "data-original", "data-lazy-src", "data-iframe-src", "data-video", "data-file", "data-stream", "data-source", "data-mp4", "data-webm", "data-hls", "data-m3u8", "data-player", "data-embed", "data-id", "data-link", "data-target"]
     });
   }
 

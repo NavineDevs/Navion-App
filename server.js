@@ -12,6 +12,8 @@ const APP_STATIC = path.join(__dirname, "static");
 const NAVION_PREFIX = "/nv/";
 const DEFAULT_DUCK_AI_ORIGIN = "https://duck.ai/";
 const DEFAULT_DUCKDUCKGO_ORIGIN = "https://duckduckgo.com/";
+let lastChallengeBase = null;
+let lastChallengeBaseAt = 0;
 
 const MIMES = {
   ".html": "text/html; charset=utf-8",
@@ -142,7 +144,19 @@ function isDroppedTelemetryUrl(url) {
 
 function resolveKnownAssetTarget(pathname, search, baseTarget) {
   const pathValue = String(pathname || "");
-  if (baseTarget && (pathValue.startsWith("/_next/") || pathValue.startsWith("/assets/") || pathValue.startsWith("/static/"))) {
+  if (
+    baseTarget &&
+    (
+      pathValue.startsWith("/_next/") ||
+      pathValue.startsWith("/assets/") ||
+      pathValue.startsWith("/static/") ||
+      pathValue.startsWith("/cdn-cgi/") ||
+      pathValue.startsWith("/content/") ||
+      pathValue.startsWith("/wp-content/") ||
+      pathValue.startsWith("/wp-includes/") ||
+      /\.(?:js|mjs|css|json|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|mp4|webm|m3u8|mpd|ts|m4s|m4v|mov|m4a|mp3|aac|vtt)(?:$|\?)/i.test(pathValue)
+    )
+  ) {
     try {
       return new URL(pathValue + (search || ""), baseTarget).href;
     } catch {}
@@ -196,7 +210,7 @@ function normalizeProxyTarget(target) {
     const host = targetUrl.hostname.toLowerCase();
     if (
       (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
-      (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/"))
+      (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/") || targetUrl.searchParams.get("duckai") === "1" || targetUrl.searchParams.get("ia") === "chat" || targetUrl.searchParams.get("iax") === "chat")
     ) {
       const aiUrl = new URL(DEFAULT_DUCK_AI_ORIGIN);
       aiUrl.pathname = targetUrl.pathname === "/ai" ? "/" : targetUrl.pathname.slice(3) || "/";
@@ -256,6 +270,11 @@ function resolveBaseContext(req) {
     } catch {}
   }
 
+  if (!baseTarget && String(req.url || "").startsWith("/cdn-cgi/") && lastChallengeBase && Date.now() - lastChallengeBaseAt < 120000) {
+    baseTarget = lastChallengeBase;
+    fromProxyReferer = true;
+  }
+
   return { baseTarget, fromProxyReferer };
 }
 
@@ -263,6 +282,16 @@ function proxyTarget(req, res, target) {
   const proxyUrl = new URL("/api/fetch", `http://${req.headers.host}`);
   proxyUrl.searchParams.set("url", encode(normalizeProxyTarget(target)));
   return handleProxy(req, res, proxyUrl);
+}
+
+function rememberChallengeTarget(target) {
+  try {
+    const targetUrl = new URL(target);
+    if (targetUrl.pathname.startsWith("/cdn-cgi/") || targetUrl.hostname.toLowerCase().includes("nhplayer")) {
+      lastChallengeBase = targetUrl.origin + "/";
+      lastChallengeBaseAt = Date.now();
+    }
+  } catch {}
 }
 
 function setBaseCookies(res, target) {
@@ -280,7 +309,13 @@ function setBaseCookies(res, target) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  if (url.pathname === "/api/fetch") return handleProxy(req, res, url);
+  if (url.pathname === "/api/fetch") {
+    try {
+      const encodedTarget = url.searchParams.get("url");
+      if (encodedTarget) rememberChallengeTarget(normalizeProxyTarget(decode(encodedTarget)));
+    } catch {}
+    return handleProxy(req, res, url);
+  }
 
   if (url.pathname === "/api/navion-status") {
     const runtime = getNavionAppRuntime();
@@ -328,6 +363,7 @@ const server = http.createServer(async (req, res) => {
 
   const knownAssetTarget = resolveKnownAssetTarget(url.pathname, url.search, baseContext.baseTarget);
   if (knownAssetTarget) {
+    rememberChallengeTarget(knownAssetTarget);
     return proxyTarget(req, res, knownAssetTarget);
   }
 
@@ -345,6 +381,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     setBaseCookies(res, target);
+    rememberChallengeTarget(target);
     try {
       if (isDroppedTelemetryUrl(new URL(target))) {
         res.writeHead(204, { "Cache-Control": "no-store" });

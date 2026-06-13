@@ -1,10 +1,12 @@
 const PROXY_ENDPOINT = "/api/fetch";
+let lastChallengeBase = null;
+let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.44";
+const CACHE_NAME = "navion-runtime-v4.2.47";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=4.2.44",
-  "/nv.register.js?v=4.2.44",
+  "/nv.client.js?v=4.2.47",
+  "/nv.register.js?v=4.2.47",
   "/nav/home",
   "/nav/error",
 ];
@@ -87,8 +89,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=4.2.44" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=4.2.44" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=4.2.47" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=4.2.47" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -235,7 +237,19 @@ function isDroppedTelemetryUrl(url) {
 
 function resolveKnownAssetTarget(url, baseUrl) {
   const path = String(url.pathname || "");
-  if (baseUrl && (path.startsWith("/_next/") || path.startsWith("/assets/") || path.startsWith("/static/"))) {
+  if (
+    baseUrl &&
+    (
+      path.startsWith("/_next/") ||
+      path.startsWith("/assets/") ||
+      path.startsWith("/static/") ||
+      path.startsWith("/cdn-cgi/") ||
+      path.startsWith("/content/") ||
+      path.startsWith("/wp-content/") ||
+      path.startsWith("/wp-includes/") ||
+      /\.(?:js|mjs|css|json|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|mp4|webm|m3u8|mpd|ts|m4s|m4v|mov|m4a|mp3|aac|vtt)(?:$|\?)/i.test(path)
+    )
+  ) {
     try {
       return new URL(path + url.search + url.hash, baseUrl).href;
     } catch {}
@@ -406,9 +420,19 @@ async function handleNonNavionRequest(event, requestUrl) {
       headers: { "Cache-Control": "no-store" },
     });
   }
-  const baseUrl = await resolveBaseUrl(event);
+  let baseUrl = await resolveBaseUrl(event);
+  if (!baseUrl && requestUrl.pathname.startsWith("/cdn-cgi/") && lastChallengeBase && Date.now() - lastChallengeBaseAt < 120000) {
+    baseUrl = lastChallengeBase;
+  }
   const knownAssetTarget = resolveKnownAssetTarget(requestUrl, baseUrl);
   if (knownAssetTarget) {
+    try {
+      const targetUrl = new URL(knownAssetTarget);
+      if (targetUrl.pathname.startsWith("/cdn-cgi/") || targetUrl.hostname.toLowerCase().indexOf("nhplayer") !== -1) {
+        lastChallengeBase = targetUrl.origin + "/";
+        lastChallengeBaseAt = Date.now();
+      }
+    } catch {}
     const encoded = swEncode(knownAssetTarget);
     if (encoded) {
       try {
