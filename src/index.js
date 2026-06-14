@@ -10,4 +10,3 @@ export function getNavionAppRuntime() {
     coreImport: NAVION_APP_CONFIG.coreImportPath,
   };
 }
-

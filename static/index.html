@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=4.2.47"></script>
+  <script src="/nv.register.js?v=1.0.1"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -99,7 +99,7 @@
       flex: 0 0 auto;
     }
     .nv-tab-new:hover, .nv-tab:hover { background: #2b3560; }
-    .nv-view { width: 100%; height: 100%; min-height: 0; border: 0; background: #fff; display: block; }
+    .nv-view { width: 100%; height: 100%; min-height: 0; border: 0; background: #fff; display: block; pointer-events: auto; }
   </style>
 </head>
 <body>
@@ -249,6 +249,67 @@
           pathname === "/generate_204"
         );
       }
+      function nvIsYouTubeBarePath(pathname) {
+        var path = String(pathname || "");
+        if (path.indexOf("/youtubei/") === 0 || path.indexOf("/s/") === 0) return true;
+        if (path === "/watch") return true;
+        if (path.indexOf("/watch/") === 0) return false;
+        if (path === "/shorts" || path.indexOf("/shorts/") === 0) return true;
+        if (path === "/results" || path.indexOf("/results/") === 0) return true;
+        if (path.indexOf("/feed/") === 0 || path.indexOf("/@") === 0) return true;
+        if (path === "/live_chat" || path.indexOf("/live_chat/") === 0) return true;
+        return false;
+      }
+      function nvSyncShellLocation(proxySrc, displayUrl) {
+        if (typeof proxySrc !== "string" || proxySrc.indexOf("/nv/") !== 0) return;
+        try {
+          var next = proxySrc;
+          var current = window.location.pathname + window.location.search + window.location.hash;
+          if (next !== current) {
+            history.replaceState({ nvProxy: proxySrc, nvUrl: displayUrl || "" }, "", next);
+          }
+        } catch (e) {}
+      }
+      function nvRepairBareYouTubeNavigation(tab, framePath, frameSearch, frameHash) {
+        if (!tab || !nvIsYouTubeBarePath(framePath)) return false;
+        try {
+          var bareTarget = new URL(framePath + (frameSearch || "") + (frameHash || ""), tab.url || "https://www.youtube.com/").href;
+          var proxySrc = nvYoutubeProxySrc(bareTarget);
+          if (!proxySrc || proxySrc.indexOf("/nv/") !== 0) return false;
+          nvSetTabUrl(tab, bareTarget);
+          tab.src = proxySrc;
+          nvSetFrameSource(proxySrc);
+          nvSyncShellLocation(proxySrc, bareTarget);
+          nvRenderTabs();
+          nvSyncUi(tab);
+          nvSaveState();
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+      function nvProxyTargetsMatch(a, b) {
+        if (!a || !b) return false;
+        if (a === b) return true;
+        var da = nvDecodeProxyUrl(a);
+        var db = nvDecodeProxyUrl(b);
+        if (!da || !db) return false;
+        try {
+          return new URL(da).href === new URL(db).href;
+        } catch (e) {
+          return da === db;
+        }
+      }
+      function nvYoutubeProxySrc(targetUrl) {
+        try {
+          var r = new URL(targetUrl);
+          var host = r.hostname.toLowerCase();
+          if (host.indexOf("youtube") !== -1) {
+            return "/nv/" + nvEncode(r.origin + "/") + r.pathname + r.search + r.hash;
+          }
+        } catch (e) {}
+        return nvToProxy(targetUrl);
+      }
       function nvIsShellPath(pathname) {
         return pathname === "/" || pathname === "/index.html" || pathname === "/app";
       }
@@ -310,7 +371,7 @@
         var target = displayUrl || src;
         var normalized = nvNormalize(target);
         if (!normalized) return null;
-        return nvToProxy(normalized);
+        return nvYoutubeProxySrc(normalized);
       }
       function nvCanonicalFramePath(rawSrc) {
         if (typeof rawSrc !== "string" || !rawSrc.trim()) return "";
@@ -479,14 +540,22 @@
           }
         }
         var canonicalFrame = nvCanonicalFramePath(frameSrc);
-        if (canonicalFrame !== normalizedSrc) {
+        var framePath = "";
+        var bareSearch = "";
+        var bareHash = "";
+        try {
+          framePath = String(nvFrame.contentWindow.location.pathname || "");
+          bareSearch = String(nvFrame.contentWindow.location.search || "");
+          bareHash = String(nvFrame.contentWindow.location.hash || "");
+        } catch (e3) {
+          framePath = "";
+        }
+        if (nvIsYouTubeBarePath(framePath)) {
+          if (nvRepairBareYouTubeNavigation(tab, framePath, bareSearch, bareHash)) return;
+        }
+        if (!nvProxyTargetsMatch(canonicalFrame, normalizedSrc) && !nvProxyTargetsMatch(tab.src, normalizedSrc)) {
           tab.src = normalizedSrc;
-          var framePath = "";
-          try {
-            framePath = String(nvFrame.contentWindow.location.pathname || "");
-          } catch (e3) {
-            framePath = "";
-          }
+          nvSyncShellLocation(normalizedSrc, tab.url);
           if (!framePath || (!framePath.startsWith("/nv/") && !nvIsLocalPath(framePath))) {
             nvSetFrameSource(normalizedSrc);
           }
@@ -701,6 +770,7 @@
         if (nextSrc) tab.src = nextSrc;
         nvSanitizeTab(tab);
         nvSetFrameSource(tab.src);
+        nvSyncShellLocation(tab.src, tab.url);
         nvRenderTabs();
         nvSyncUi(tab);
         nvSaveState();
@@ -807,7 +877,10 @@
           nvSetTabUrl(activeTab, displayUrl);
           if (data.proxyHref && typeof data.proxyHref === "string") {
             var proxiedSrc = nvNormalizeFrameSrc(data.proxyHref, displayUrl);
-            if (proxiedSrc) activeTab.src = proxiedSrc;
+            if (proxiedSrc) {
+              activeTab.src = proxiedSrc;
+              nvSyncShellLocation(proxiedSrc, displayUrl);
+            }
           }
           nvRenderTabs();
           nvSyncUi(activeTab);
@@ -839,12 +912,18 @@
             if (out && active) {
               active.url = out;
               active.label = nvDisplayLabel(out);
+              active.src = path + search + hash;
               nvUrl.value = out;
+              nvSyncShellLocation(active.src, out);
               nvRenderTabs();
               nvSyncUi(active);
               nvTrackHistory(out);
               nvSaveState();
             }
+          }
+          if (nvIsYouTubeBarePath(path)) {
+            var activeYt = nvFindTab(nvActiveTabId);
+            if (activeYt && nvRepairBareYouTubeNavigation(activeYt, path, search, hash)) return;
           }
           if ((path === "/nav/home" || path === "/nav/error") && (!expectedPath || expectedPath === path)) {
             var activeNav = nvFindTab(nvActiveTabId);
@@ -869,9 +948,13 @@
             if (tab && expectedPath && expectedPath.indexOf("/nv/") === 0 && !path.startsWith("/nv/") && !nvIsLocalPath(path)) {
               try {
                 var maskedUrl = new URL(path + search + hash, tab.url).href;
+                var maskedProxy = nvYoutubeProxySrc(maskedUrl);
                 tab.url = maskedUrl;
                 tab.label = nvDisplayLabel(maskedUrl);
+                tab.src = maskedProxy;
                 if (!nvUrlEditing) nvUrl.value = maskedUrl;
+                nvSyncShellLocation(maskedProxy, maskedUrl);
+                nvSetFrameSource(maskedProxy);
                 nvRenderTabs();
                 nvSyncUi(tab);
                 nvTrackHistory(maskedUrl);
@@ -879,13 +962,13 @@
                 return;
               } catch (maskedError) {}
             }
-            if (tab && currentUrl !== tab.src) {
+            if (tab && !nvProxyTargetsMatch(currentUrl, tab.src)) {
               var normalizedSrc = nvNormalizeFrameSrc(currentUrl, tab.url);
               if (normalizedSrc) {
                 tab.src = normalizedSrc;
-                if (!nvIsLocalPath(path) && !(expectedPath && expectedPath.indexOf("/nv/") === 0)) {
+                if (!nvIsLocalPath(path) && !nvIsYouTubeBarePath(path) && !(expectedPath && expectedPath.indexOf("/nv/") === 0)) {
                   var frameAttr = String(nvFrame.getAttribute("src") || "");
-                  if (nvCanonicalFramePath(frameAttr) !== normalizedSrc) {
+                  if (!nvProxyTargetsMatch(frameAttr, normalizedSrc)) {
                     nvSetFrameSource(normalizedSrc);
                     nvSaveState();
                     return;

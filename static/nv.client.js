@@ -3,8 +3,10 @@
   if (!cfg || typeof cfg.rewrite !== "function") return;
   var mode = cfg.mode || "full";
   var passiveMode = mode === "lite-nav";
-  var lightMode = mode === "youtube" || mode === "lite" || passiveMode;
+  var lightMode = mode === "lite" || passiveMode;
   var navigationRedirecting = false;
+  var lastEnforcedProxyPath = "";
+  var nativeHistoryReplace = null;
 
   var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1, "data-src": 1, "data-href": 1, "data-url": 1, "data-original": 1, "data-lazy-src": 1, "data-iframe-src": 1, "data-video": 1, "data-file": 1, "data-stream": 1, "data-source": 1, "data-mp4": 1, "data-webm": 1, "data-hls": 1, "data-m3u8": 1, "data-player": 1, "data-embed": 1, "data-id": 1, "data-link": 1, "data-target": 1 };
   var LOCAL_ALLOW = {
@@ -21,19 +23,90 @@
     "/index.html": 1
   };
 
+  function needsProxyHost(hostname) {
+    var host = String(hostname || "").toLowerCase();
+    return (
+      host === "googlevideo.com" ||
+      host.endsWith(".googlevideo.com") ||
+      host.endsWith(".gstatic.com") ||
+      host.endsWith(".ytimg.com") ||
+      host.endsWith(".ggpht.com") ||
+      host.endsWith(".googleapis.com") ||
+      host.endsWith(".doubleclick.net") ||
+      host.indexOf("youtube") !== -1
+    );
+  }
+
+  function isYouTubeBarePath(pathname) {
+    var path = String(pathname || "");
+    if (path.indexOf("/youtubei/") === 0 || path.indexOf("/s/") === 0) return true;
+    if (path === "/watch") return true;
+    if (path.indexOf("/watch/") === 0) return false;
+    if (path === "/shorts" || path.indexOf("/shorts/") === 0) return true;
+    if (path === "/results" || path.indexOf("/results/") === 0) return true;
+    if (path.indexOf("/feed/") === 0 || path.indexOf("/@") === 0) return true;
+    if (path === "/live_chat" || path.indexOf("/live_chat/") === 0) return true;
+    return false;
+  }
+
+  function isSpaRelativePath(value) {
+    return typeof value === "string" && value.charAt(0) === "/" && value.indexOf("//") !== 0;
+  }
+
+  function isYouTubeSiteBase(base) {
+    return /https?:\/\/(?:[^/]+\.)?youtube\.com\//i.test(String(base || ""));
+  }
+
+  function needsProxyHistoryRewrite(url) {
+    if (url === undefined || url === null) return false;
+    var urlStr = String(url);
+    if (!urlStr || urlStr.indexOf("#") === 0) return false;
+    if (!isSpaRelativePath(urlStr)) return true;
+    return isYouTubeSiteBase(currentBase()) && isYouTubeBarePath(urlStr);
+  }
+
+  function isYouTubeShortsView() {
+    try {
+      var path = String(window.location.pathname || "");
+      if (path.indexOf("/shorts") !== -1) return true;
+      return /\/shorts(?:\/|$|\?)/i.test(String(currentBase() || ""));
+    } catch (_e) {}
+    return false;
+  }
+
+  function isProxiedNavionUrl(value) {
+    if (typeof value !== "string") return false;
+    try {
+      var parsed = new URL(value, window.location.href);
+      return parsed.origin === window.location.origin && parsed.pathname.indexOf("/nv/") === 0;
+    } catch (_e) {
+      return false;
+    }
+  }
+
   function rewriteUrl(value) {
     if (typeof value !== "string") return value;
     if (!value.trim()) return value;
+    if (isProxiedNavionUrl(value)) {
+      try {
+        var proxied = new URL(value, window.location.href);
+        return proxied.pathname + proxied.search + proxied.hash;
+      } catch (_e0) {
+        return value;
+      }
+    }
     var base = currentBase();
     try {
       var parsed = new URL(value, window.location.href);
       if (parsed.origin === window.location.origin) {
-        if (parsed.pathname.indexOf("/nv/") === 0) {
-          var decoded = decodeFromPath(parsed.pathname, parsed.search, parsed.hash);
-          if (decoded) value = decoded;
-        } else if (!LOCAL_ALLOW[parsed.pathname]) {
+        if (!LOCAL_ALLOW[parsed.pathname]) {
+          if (isYouTubeBarePath(parsed.pathname)) {
+            return cfg.rewrite(parsed.pathname + parsed.search + parsed.hash, base || cfg.base || window.location.href);
+          }
           value = parsed.pathname + parsed.search + parsed.hash;
         }
+      } else if (needsProxyHost(parsed.hostname)) {
+        return cfg.rewrite(parsed.href, base || cfg.base || window.location.href);
       }
     } catch (_e) {}
     return cfg.rewrite(value, base || cfg.base || window.location.href);
@@ -55,7 +128,7 @@
     var rawToken = slash < 0 ? rawPath : rawPath.slice(0, slash);
     var suffix = slash < 0 ? "" : rawPath.slice(slash);
     if (!suffix) {
-      var markers = ["dist/", "_next/", "country.json", "duckchat/"];
+      var markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
       for (var i = 0; i < markers.length; i++) {
         var index = rawPath.indexOf(markers[i]);
         if (index > 0) {
@@ -68,10 +141,21 @@
     try { rawToken = decodeURIComponent(rawToken); } catch (_e0) {}
     var decoded = /^https?:\/\//i.test(rawToken) ? rawToken : decodeToken(rawToken);
     if (!/^https?:\/\//i.test(decoded)) return "";
+    for (var unwrap = 0; unwrap < 4; unwrap++) {
+      try {
+        var nested = new URL(decoded);
+        if (nested.origin !== window.location.origin || nested.pathname.indexOf("/nv/") !== 0) break;
+        var inner = decodeFromPath(nested.pathname, nested.search, nested.hash);
+        if (!inner || inner === decoded) break;
+        decoded = inner;
+      } catch (_e2) {
+        break;
+      }
+    }
     try {
       var target = new URL(decoded);
       if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
-      if (search) target.search = search;
+      if (search && !target.search) target.search = search;
       if (hash) target.hash = hash;
       var host = target.hostname.toLowerCase();
       if ((host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0 || target.searchParams.get("duckai") === "1" || target.searchParams.get("ia") === "chat" || target.searchParams.get("iax") === "chat")) {
@@ -136,10 +220,12 @@
     var nativeFetch = window.fetch;
     window.fetch = function (input, init) {
       if (typeof input === "string") {
-        input = rewriteUrl(input);
+        if (!isProxiedNavionUrl(input)) input = rewriteUrl(input);
       } else if (input && typeof input.url === "string") {
-        var rewritten = rewriteUrl(input.url);
-        if (rewritten !== input.url) input = new Request(rewritten, input);
+        if (!isProxiedNavionUrl(input.url)) {
+          var rewritten = rewriteUrl(input.url);
+          if (rewritten !== input.url) input = new Request(rewritten, input);
+        }
       }
       return nativeFetch.call(this, input, init);
     };
@@ -149,9 +235,65 @@
     if (!window.XMLHttpRequest || !window.XMLHttpRequest.prototype) return;
     var nativeOpen = window.XMLHttpRequest.prototype.open;
     window.XMLHttpRequest.prototype.open = function (method, url) {
-      if (typeof url === "string") url = rewriteUrl(url);
+      if (typeof url === "string" && !isProxiedNavionUrl(url)) url = rewriteUrl(url);
       return nativeOpen.call(this, method, url, arguments[2], arguments[3], arguments[4]);
     };
+  }
+
+  function patchRequest() {
+    if (typeof window.Request !== "function") return;
+    var NativeRequest = window.Request;
+    window.Request = function (input, init) {
+      if (typeof input === "string") {
+        if (!isProxiedNavionUrl(input)) input = rewriteUrl(input);
+      } else if (input && typeof input.url === "string") {
+        if (!isProxiedNavionUrl(input.url)) {
+          var rewritten = rewriteUrl(input.url);
+          if (rewritten !== input.url) input = new NativeRequest(rewritten, input);
+        }
+      }
+      return new NativeRequest(input, init);
+    };
+    window.Request.prototype = NativeRequest.prototype;
+    try { Object.defineProperty(window.Request, "name", { value: "Request" }); } catch (_e0) {}
+  }
+
+  function patchLocationMethods() {
+    if (!window.location) return;
+    ["assign", "replace"].forEach(function (method) {
+      var native = window.location[method];
+      if (typeof native !== "function") return;
+      window.location[method] = function (url) {
+        if (typeof url === "string" && needsProxyHistoryRewrite(url)) url = rewriteUrl(url);
+        return native.call(this, url);
+      };
+    });
+    try {
+      var proto = window.Location && window.Location.prototype;
+      var desc = proto && Object.getOwnPropertyDescriptor(proto, "href");
+      if (desc && typeof desc.set === "function" && typeof desc.get === "function") {
+        Object.defineProperty(window.location, "href", {
+          configurable: true,
+          enumerable: desc.enumerable,
+          get: desc.get,
+          set: function (value) {
+            if (typeof value === "string" && needsProxyHistoryRewrite(value)) value = rewriteUrl(value);
+            return desc.set.call(this, value);
+          }
+        });
+      }
+    } catch (_e1) {}
+  }
+
+  function patchDynamicImport() {
+    if (typeof window.__nvImportPatched !== "undefined") return;
+    window.__nvImportPatched = true;
+    try {
+      var nativeImport = new Function("u", "return import(u)");
+      window.__nvDynamicImport = function (url) {
+        return nativeImport(typeof url === "string" ? rewriteUrl(url) : url);
+      };
+    } catch (_e2) {}
   }
 
   function patchHistory() {
@@ -159,18 +301,21 @@
     if (typeof window.history.pushState === "function") {
       var nativePush = window.history.pushState;
       window.history.pushState = function (state, title, url) {
-        if (url !== undefined && url !== null) url = rewriteUrl(String(url));
+        if (needsProxyHistoryRewrite(url)) url = rewriteUrl(String(url));
         var out = nativePush.call(this, state, title, url);
         emitLocation();
+        setTimeout(enforceProxyLocation, 0);
         return out;
       };
     }
     if (typeof window.history.replaceState === "function") {
       var nativeReplace = window.history.replaceState;
+      nativeHistoryReplace = nativeReplace.bind(window.history);
       window.history.replaceState = function (state, title, url) {
-        if (url !== undefined && url !== null) url = rewriteUrl(String(url));
+        if (needsProxyHistoryRewrite(url)) url = rewriteUrl(String(url));
         var out = nativeReplace.call(this, state, title, url);
         emitLocation();
+        setTimeout(enforceProxyLocation, 0);
         return out;
       };
     }
@@ -212,6 +357,11 @@
       var rewritten = rewriteUrl(href);
       if (el.getAttribute("target")) el.setAttribute("target", "_self");
       if (rewritten !== href) {
+        el.setAttribute("href", rewritten);
+        if (isSpaRelativePath(href)) {
+          setTimeout(emitLocation, 0);
+          return;
+        }
         event.preventDefault();
         window.location.assign(rewritten);
         return;
@@ -241,6 +391,7 @@
         var dest = event.destination.url;
         var rewritten = rewriteUrl(dest);
         if (rewritten === dest) return;
+        if (!needsProxyHistoryRewrite(dest)) return;
         if (typeof event.preventDefault === "function" && event.cancelable !== false) {
           event.preventDefault();
         }
@@ -333,26 +484,42 @@
     rewriteNodeAttrs(root);
   }
 
+  function shouldEnforceProxyLocation() {
+    if (!passiveMode) return true;
+    return isYouTubeSiteBase(currentBase());
+  }
+
   function cleanupSiteOverlays() {
-    var base = currentBase();
-    if (!/https?:\/\/([^/]+\.)?youtube\.com\//i.test(base)) return;
-    var backdrops = document.querySelectorAll("tp-yt-iron-overlay-backdrop");
-    for (var i = 0; i < backdrops.length; i++) {
-      var el = backdrops[i];
-      try {
-        el.removeAttribute("opened");
-        el.style.display = "none";
-        el.style.opacity = "0";
-        el.style.pointerEvents = "none";
-      } catch (_e) {}
+    if (!isYouTubeShortsView()) return;
+    var selectors = [
+      "tp-yt-iron-overlay-backdrop",
+      "ytd-popup-container",
+      "iron-overlay-backdrop",
+      "ytd-unified-share-panel-renderer",
+      "ytd-engagement-panel-section-list-renderer"
+    ];
+    for (var s = 0; s < selectors.length; s++) {
+      var nodes = document.querySelectorAll(selectors[s]);
+      for (var i = 0; i < nodes.length; i++) {
+        var el = nodes[i];
+        try {
+          if (el.hasAttribute && el.hasAttribute("opened")) el.removeAttribute("opened");
+          el.style.display = "none";
+          el.style.opacity = "0";
+          el.style.pointerEvents = "none";
+          el.style.visibility = "hidden";
+        } catch (_e) {}
+      }
     }
-    var drawer = document.querySelector("tp-yt-app-drawer[opened]");
-    if (drawer && window.innerWidth > 900 && !/https?:\/\/([^/]+\.)?youtube\.com\//i.test(base)) {
-      try {
-        drawer.removeAttribute("opened");
-        drawer.style.pointerEvents = "none";
-      } catch (_e2) {}
-    }
+    try {
+      var style = document.getElementById("nv-shorts-scroll-fix");
+      if (!style && document.head) {
+        style = document.createElement("style");
+        style.id = "nv-shorts-scroll-fix";
+        style.textContent = "html,body,ytd-app,#content,#page-manager{overflow:visible!important;overscroll-behavior:auto!important;touch-action:auto!important}tp-yt-iron-overlay-backdrop,iron-overlay-backdrop{pointer-events:none!important;display:none!important}";
+        document.head.appendChild(style);
+      }
+    } catch (_e2) {}
   }
 
   function enforceProxyLocation() {
@@ -360,10 +527,15 @@
     if (LOCAL_ALLOW[window.location.pathname]) return;
     var base = currentBase();
     if (!/^https?:\/\//i.test(base)) return;
+    if (!isYouTubeSiteBase(base)) return;
     try {
       var target = new URL(window.location.pathname + window.location.search + window.location.hash, base);
       var next = "/nv/" + cfg.encode(target.origin + "/") + target.pathname + target.search + target.hash;
-      window.history.replaceState(window.history.state, document.title, next);
+      var current = window.location.pathname + window.location.search + window.location.hash;
+      if (next === current || next === lastEnforcedProxyPath) return;
+      lastEnforcedProxyPath = next;
+      var replaceFn = nativeHistoryReplace || window.history.replaceState;
+      replaceFn(window.history.state, document.title, next);
       emitLocation();
     } catch (_e) {}
   }
@@ -374,24 +546,29 @@
   }
   patchFetch();
   patchXhr();
-  if (!passiveMode) patchHistory();
-  if (!passiveMode) patchNavigationApi();
+  patchRequest();
+  patchLocationMethods();
+  patchDynamicImport();
+  if (shouldEnforceProxyLocation()) patchHistory();
+  if (shouldEnforceProxyLocation()) patchNavigationApi();
   patchWindowOpen();
   patchConstructor("EventSource");
   patchConstructor("Worker");
   patchConstructor("SharedWorker");
+  patchConstructor("WebSocket");
+  patchConstructor("Image");
   bindNavigationEvents();
   if (!lightMode) rewriteCurrentDocument();
   if (!lightMode) observeDom();
-  if (!passiveMode) enforceProxyLocation();
+  if (shouldEnforceProxyLocation()) enforceProxyLocation();
   cleanupSiteOverlays();
 
   window.addEventListener("load", emitLocation, true);
-  if (!passiveMode) window.addEventListener("load", enforceProxyLocation, true);
+  if (shouldEnforceProxyLocation()) window.addEventListener("load", enforceProxyLocation, true);
   window.addEventListener("load", cleanupSiteOverlays, true);
   window.addEventListener("hashchange", emitLocation, true);
   window.addEventListener("popstate", emitLocation, true);
-  if (!passiveMode) setInterval(enforceProxyLocation, 500);
+  if (shouldEnforceProxyLocation()) setInterval(enforceProxyLocation, 2000);
   setInterval(cleanupSiteOverlays, 1500);
   setTimeout(emitLocation, 0);
 })();

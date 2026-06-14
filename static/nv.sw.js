@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v4.2.47";
+const CACHE_NAME = "navion-runtime-v1.0.1";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=4.2.47",
-  "/nv.register.js?v=4.2.47",
+  "/nv.client.js?v=1.0.1",
+  "/nv.register.js?v=1.0.1",
   "/nav/home",
   "/nav/error",
 ];
@@ -68,6 +68,10 @@ self.addEventListener("fetch", (event) => {
     }
     return;
   }
+  if (url.pathname.startsWith(NAVION_PREFIX)) {
+    event.respondWith(handleRequest(event));
+    return;
+  }
   if (PASSTHROUGH.has(url.pathname)) {
     if (url.pathname === "/generate_204") {
       event.respondWith(new Response(null, {
@@ -84,13 +88,11 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(handleNonNavionRequest(event, url));
     return;
   }
-
-  event.respondWith(handleRequest(event));
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=4.2.47" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=4.2.47" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.1" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.1" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -112,7 +114,7 @@ async function handleLocalRequest(request, url) {
 }
 
 async function handleCrossOriginRequest(request, requestUrl) {
-  if (shouldUseDirectCrossOrigin(requestUrl)) {
+  if (!needsProxyCrossOriginHost(requestUrl.hostname) && shouldUseDirectCrossOrigin(requestUrl)) {
     return safeFetch(request);
   }
   if (isDroppedTelemetryUrl(requestUrl)) {
@@ -162,6 +164,52 @@ function swDecode(encoded) {
   }
 }
 
+function decodeNavionCookie(value) {
+  if (!value) return null;
+  const decoded = swDecode(value);
+  if (decoded && /^https?:\/\//i.test(decoded)) return decoded;
+  try {
+    const plain = decodeURIComponent(value);
+    if (/^https?:\/\//i.test(plain)) return plain;
+  } catch {}
+  return /^https?:\/\//i.test(value) ? value : null;
+}
+
+function isYouTubePagePath(pathname) {
+  const path = String(pathname || "");
+  if (path.startsWith("/youtubei/") || path.startsWith("/s/")) return true;
+  if (path === "/watch") return true;
+  if (path.startsWith("/watch/")) return false;
+  if (path === "/shorts" || path.startsWith("/shorts/")) return true;
+  if (path === "/embed" || path.startsWith("/embed/")) return true;
+  if (path === "/results" || path.startsWith("/results/")) return true;
+  if (path.startsWith("/channel/") || path.startsWith("/c/") || path.startsWith("/user/")) return true;
+  if (path.startsWith("/playlist")) return true;
+  if (path.startsWith("/feed/")) return true;
+  if (path.startsWith("/@")) return true;
+  if (path === "/live_chat" || path.startsWith("/live_chat/")) return true;
+  return false;
+}
+
+function resolveDefaultBaseTarget(pathname) {
+  if (isYouTubePagePath(pathname)) return "https://www.youtube.com/";
+  return null;
+}
+
+function needsProxyCrossOriginHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return (
+    host === "googlevideo.com" ||
+    host.endsWith(".googlevideo.com") ||
+    host.endsWith(".gstatic.com") ||
+    host.endsWith(".ytimg.com") ||
+    host.endsWith(".ggpht.com") ||
+    host.endsWith(".googleapis.com") ||
+    host.endsWith(".doubleclick.net") ||
+    host.indexOf("youtube") !== -1
+  );
+}
+
 function shouldUseDirectCrossOrigin(url) {
   const host = String(url.hostname || "").toLowerCase();
   return (
@@ -186,10 +234,18 @@ function decodeNestedUrl(value) {
   return /^https?:\/\//i.test(out) ? out : null;
 }
 
+function isShellPath(pathname) {
+  return pathname === "/" || pathname === "/app" || pathname === "/index.html";
+}
+
 function normalizeTargetUrl(target) {
   try {
     const targetUrl = new URL(target);
     const host = targetUrl.hostname.toLowerCase();
+    if (host === "m.youtube.com") {
+      targetUrl.hostname = "www.youtube.com";
+      return targetUrl.href;
+    }
     if (
       (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
       (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/") || targetUrl.searchParams.get("duckai") === "1" || targetUrl.searchParams.get("ia") === "chat" || targetUrl.searchParams.get("iax") === "chat")
@@ -296,7 +352,7 @@ function resolveTargetFromNavionUrl(url) {
   try {
     const target = new URL(decoded);
     if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
-    if (url.search) target.search = url.search;
+    if (url.search && !target.search) target.search = url.search;
     return target.href;
   } catch {
     return null;
@@ -362,12 +418,12 @@ async function resolveBaseUrl(event) {
   try {
     const cookies = parseCookieHeader(event.request.headers.get("cookie") || "");
     if (cookies.nv_base) {
-      const decodedBase = swDecode(cookies.nv_base);
-      if (decodedBase && /^https?:\/\//i.test(decodedBase)) return decodedBase;
+      const decodedBase = decodeNavionCookie(cookies.nv_base);
+      if (decodedBase) return decodedBase;
     }
     if (cookies.nv_origin) {
-      const decodedOrigin = swDecode(cookies.nv_origin);
-      if (decodedOrigin && /^https?:\/\//i.test(decodedOrigin)) return decodedOrigin + "/";
+      const decodedOrigin = decodeNavionCookie(cookies.nv_origin);
+      if (decodedOrigin) return decodedOrigin + "/";
     }
   } catch {}
 
@@ -379,23 +435,73 @@ async function proxyWithEncoded(request, encoded) {
   apiUrl.searchParams.set("url", encoded);
 
   const forwardHeaders = {};
+  let origin = request.headers.get("origin");
+  if (!origin && request.referrer) {
+    try {
+      origin = new URL(request.referrer).origin;
+    } catch {}
+  }
   for (const [key, value] of request.headers) {
     const lower = key.toLowerCase();
     if (lower === "host" || lower === "origin") continue;
     forwardHeaders[key] = value;
   }
+  if (origin) forwardHeaders.Origin = origin;
 
   const response = await fetch(apiUrl.href, {
     method: request.method,
     headers: forwardHeaders,
     body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.blob(),
+    credentials: "include",
+    redirect: "follow",
   });
-  return normalizeProxyResponse(request, response);
+  return await normalizeProxyResponse(request, response);
 }
 
-function normalizeProxyResponse(request, response) {
+async function followProxyRedirect(request, response) {
+  if (!response || response.status < 300 || response.status >= 400) return response;
+  const location = response.headers.get("location");
+  if (!location) return response;
+  try {
+    let target = location;
+    const resolved = new URL(location, self.location.origin);
+    if (resolved.origin === self.location.origin && resolved.pathname.startsWith(NAVION_PREFIX)) {
+      const fromNavion = resolveTargetFromNavionUrl(resolved);
+      if (fromNavion) target = fromNavion;
+    } else if (!/^https?:/i.test(location)) {
+      target = resolved.href;
+    }
+    const encoded = swEncode(normalizeTargetUrl(target));
+    if (!encoded) return response;
+    try {
+      if (response.body && typeof response.body.cancel === "function") await response.body.cancel();
+    } catch {}
+    return proxyWithEncoded(request, encoded);
+  } catch {
+    return response;
+  }
+}
+
+async function normalizeProxyResponse(request, response) {
   if (!response) return response;
+  if (response.status >= 300 && response.status < 400) {
+    return followProxyRedirect(request, response);
+  }
   if (response.status < 500) return response;
+  let host = "";
+  try {
+    const reqUrl = new URL(request.url);
+    if (reqUrl.pathname.startsWith(NAVION_PREFIX)) {
+      const target = resolveTargetFromNavionUrl(reqUrl);
+      if (target) host = new URL(target).hostname.toLowerCase();
+    }
+  } catch {}
+  if (host.endsWith(".googlevideo.com") || host === "googlevideo.com") {
+    return new Response("", {
+      status: 403,
+      headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8", "X-Navion-Playback": "blocked" },
+    });
+  }
   if (isNavigationRequest(request)) return navigationErrorResponse(request);
   const empty = emptyAssetResponse(request);
   if (empty) return empty;
@@ -420,7 +526,18 @@ async function handleNonNavionRequest(event, requestUrl) {
       headers: { "Cache-Control": "no-store" },
     });
   }
+  if (PASSTHROUGH.has(requestUrl.pathname) || isShellPath(requestUrl.pathname)) {
+    if (requestUrl.pathname === "/generate_204") {
+      return new Response(null, {
+        status: 204,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    return handleLocalRequest(event.request, requestUrl);
+  }
+
   let baseUrl = await resolveBaseUrl(event);
+  if (!baseUrl) baseUrl = resolveDefaultBaseTarget(requestUrl.pathname);
   if (!baseUrl && requestUrl.pathname.startsWith("/cdn-cgi/") && lastChallengeBase && Date.now() - lastChallengeBaseAt < 120000) {
     baseUrl = lastChallengeBase;
   }
@@ -452,10 +569,9 @@ async function handleNonNavionRequest(event, requestUrl) {
   }
 
   if (
-    (requestUrl.pathname === "/" || requestUrl.pathname === "/index.html") &&
-    !baseUrl
+    isShellPath(requestUrl.pathname)
   ) {
-    return safeFetch(event.request);
+    return handleLocalRequest(event.request, requestUrl);
   }
   if (!baseUrl) return safeFetch(event.request);
 
@@ -569,13 +685,32 @@ function emptyAssetResponse(request) {
   return null;
 }
 
+function isSwNoiseTarget(url) {
+  const host = String(url.hostname || "").toLowerCase();
+  const path = String(url.pathname || "").toLowerCase();
+  return (
+    host === "improving.duckduckgo.com" ||
+    host.endsWith(".improving.duckduckgo.com") ||
+    host === "googleads.g.doubleclick.net" ||
+    path.startsWith("/youtubei/v1/log_event") ||
+    path.startsWith("/youtubei/v1/feedback") ||
+    path.startsWith("/api/stats/") ||
+    path.startsWith("/ptracking") ||
+    path.indexOf("/t/static_fcp") === 0 ||
+    path.indexOf("/t/page_home_searchbox_submit") === 0
+  );
+}
+
 function shouldReplaceAssetResponse(request, response) {
   if (!request || !response) return false;
-  const empty = emptyAssetResponse(request);
-  if (!empty) return false;
-  if (response.status >= 400) return true;
-  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
-  return contentType.includes("text/html");
+  let requestUrl = null;
+  try { requestUrl = new URL(request.url); } catch {}
+  if (requestUrl && isSwNoiseTarget(requestUrl)) {
+    if (response.status >= 400) return true;
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    return contentType.includes("text/html");
+  }
+  return false;
 }
 
 function shouldReplaceNavigationResponse(request, response) {
