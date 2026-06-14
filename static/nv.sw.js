@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.1";
+const CACHE_NAME = "navion-runtime-v1.0.2";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.1",
-  "/nv.register.js?v=1.0.1",
+  "/nv.client.js?v=1.0.2",
+  "/nv.register.js?v=1.0.2",
   "/nav/home",
   "/nav/error",
 ];
@@ -91,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.1" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.1" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.2" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.2" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -335,7 +335,7 @@ function resolveTargetFromNavionUrl(url) {
   let rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
   let suffix = slash === -1 ? "" : rawPath.slice(slash);
   if (!suffix) {
-    const markers = ["dist/", "_next/", "country.json", "duckchat/"];
+    const markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
     for (const marker of markers) {
       const index = rawPath.indexOf(marker);
       if (index > 0) {

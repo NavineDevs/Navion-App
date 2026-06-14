@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.1"></script>
+  <script src="/nv.register.js?v=1.0.2"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -147,7 +147,7 @@
           var rawToken = slash < 0 ? rawPath : rawPath.slice(0, slash);
           var suffix = slash < 0 ? "" : rawPath.slice(slash);
           if (!suffix) {
-            var markers = ["dist/", "_next/", "country.json", "duckchat/"];
+            var markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
             for (var i = 0; i < markers.length; i++) {
               var index = rawPath.indexOf(markers[i]);
               if (index > 0) {
