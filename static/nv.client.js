@@ -1,6 +1,8 @@
 (function () {
   var cfg = window.__navion;
   if (!cfg || typeof cfg.rewrite !== "function") return;
+  if (window.__navionClientRuntime === cfg) return;
+  window.__navionClientRuntime = cfg;
   var mode = cfg.mode || "full";
   var passiveMode = mode === "lite-nav";
   var lightMode = mode === "lite" || passiveMode;
@@ -159,11 +161,7 @@
       if (hash) target.hash = hash;
       var host = target.hostname.toLowerCase();
       if ((host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0 || target.searchParams.get("duckai") === "1" || target.searchParams.get("ia") === "chat" || target.searchParams.get("iax") === "chat")) {
-        var ai = new URL("https://duck.ai/");
-        ai.pathname = target.pathname === "/ai" ? "/" : target.pathname.slice(3) || "/";
-        ai.search = target.search;
-        ai.hash = target.hash;
-        return ai.href;
+        return "https://duck.ai/";
       }
       return target.href;
     } catch (_e1) {
@@ -217,8 +215,9 @@
 
   function patchFetch() {
     if (typeof window.fetch !== "function") return;
-    var nativeFetch = window.fetch;
-    window.fetch = function (input, init) {
+    if (window.fetch.__navionPatched) return;
+    var nativeFetch = window.fetch.__navionNative || window.fetch;
+    var patchedFetch = function (input, init) {
       if (typeof input === "string") {
         if (!isProxiedNavionUrl(input)) input = rewriteUrl(input);
       } else if (input && typeof input.url === "string") {
@@ -229,21 +228,29 @@
       }
       return nativeFetch.call(this, input, init);
     };
+    patchedFetch.__navionPatched = true;
+    patchedFetch.__navionNative = nativeFetch;
+    window.fetch = patchedFetch;
   }
 
   function patchXhr() {
     if (!window.XMLHttpRequest || !window.XMLHttpRequest.prototype) return;
-    var nativeOpen = window.XMLHttpRequest.prototype.open;
-    window.XMLHttpRequest.prototype.open = function (method, url) {
+    if (window.XMLHttpRequest.prototype.open.__navionPatched) return;
+    var nativeOpen = window.XMLHttpRequest.prototype.open.__navionNative || window.XMLHttpRequest.prototype.open;
+    var patchedOpen = function (method, url) {
       if (typeof url === "string" && !isProxiedNavionUrl(url)) url = rewriteUrl(url);
       return nativeOpen.call(this, method, url, arguments[2], arguments[3], arguments[4]);
     };
+    patchedOpen.__navionPatched = true;
+    patchedOpen.__navionNative = nativeOpen;
+    window.XMLHttpRequest.prototype.open = patchedOpen;
   }
 
   function patchRequest() {
     if (typeof window.Request !== "function") return;
-    var NativeRequest = window.Request;
-    window.Request = function (input, init) {
+    if (window.Request.__navionPatched) return;
+    var NativeRequest = window.Request.__navionNative || window.Request;
+    var PatchedRequest = function (input, init) {
       if (typeof input === "string") {
         if (!isProxiedNavionUrl(input)) input = rewriteUrl(input);
       } else if (input && typeof input.url === "string") {
@@ -254,7 +261,10 @@
       }
       return new NativeRequest(input, init);
     };
-    window.Request.prototype = NativeRequest.prototype;
+    PatchedRequest.__navionPatched = true;
+    PatchedRequest.__navionNative = NativeRequest;
+    PatchedRequest.prototype = NativeRequest.prototype;
+    window.Request = PatchedRequest;
     try { Object.defineProperty(window.Request, "name", { value: "Request" }); } catch (_e0) {}
   }
 

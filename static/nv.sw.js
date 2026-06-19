@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.2";
+const CACHE_NAME = "navion-runtime-v1.0.3";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.2",
-  "/nv.register.js?v=1.0.2",
+  "/nv.client.js?v=1.0.3",
+  "/nv.register.js?v=1.0.3",
   "/nav/home",
   "/nav/error",
 ];
@@ -91,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.2" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.2" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.3" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.3" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -250,11 +250,7 @@ function normalizeTargetUrl(target) {
       (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
       (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/") || targetUrl.searchParams.get("duckai") === "1" || targetUrl.searchParams.get("ia") === "chat" || targetUrl.searchParams.get("iax") === "chat")
     ) {
-      const aiUrl = new URL("https://duck.ai/");
-      aiUrl.pathname = targetUrl.pathname === "/ai" ? "/" : targetUrl.pathname.slice(3) || "/";
-      aiUrl.search = targetUrl.search;
-      aiUrl.hash = targetUrl.hash;
-      return aiUrl.href;
+      return "https://duck.ai/";
     }
     if (
       (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
@@ -730,6 +726,9 @@ function offlineResponse(request, message, status) {
 async function handleRequest(event) {
   const request = event.request;
   const url = new URL(request.url);
+  if (request.mode === "navigate" && request.destination === "document") {
+    return Response.redirect(`/app?open=${encodeURIComponent(url.pathname + url.search + url.hash)}`, 302);
+  }
   let targetUrl = resolveTargetFromNavionUrl(url);
   if (!targetUrl) targetUrl = await resolveRelativeNavionTarget(event, url);
   if (!targetUrl) {

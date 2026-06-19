@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.2"></script>
+  <script src="/nv.register.js?v=1.0.3"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -165,11 +165,7 @@
           if (parsed.search) target.search = parsed.search;
           if (parsed.hash) target.hash = parsed.hash;
           if ((target.hostname === "duckduckgo.com" || target.hostname === "www.duckduckgo.com" || target.hostname === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0 || target.searchParams.get("duckai") === "1" || target.searchParams.get("ia") === "chat" || target.searchParams.get("iax") === "chat")) {
-            var ai = new URL("https://duck.ai/");
-            ai.pathname = target.pathname === "/ai" ? "/" : target.pathname.slice(3) || "/";
-            ai.search = target.search;
-            ai.hash = target.hash;
-            return ai.href;
+            return "https://duck.ai/";
           }
           return target.href;
         } catch (e) {
@@ -261,9 +257,8 @@
         return false;
       }
       function nvSyncShellLocation(proxySrc, displayUrl) {
-        if (typeof proxySrc !== "string" || proxySrc.indexOf("/nv/") !== 0) return;
         try {
-          var next = proxySrc;
+          var next = "/app";
           var current = window.location.pathname + window.location.search + window.location.hash;
           if (next !== current) {
             history.replaceState({ nvProxy: proxySrc, nvUrl: displayUrl || "" }, "", next);
@@ -845,6 +840,19 @@
         nvCreateTab(n, nvToProxy(n), true);
       }
 
+      function nvConsumeOpenParam() {
+        try {
+          var params = new URLSearchParams(window.location.search || "");
+          var open = params.get("open");
+          if (!open) return false;
+          history.replaceState({ nvProxy: open, nvUrl: nvDecodeProxyUrl(open) || "" }, "", "/app");
+          nvOpenRequestedTab(open);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
       nvForm.onsubmit = function (e) {
         e.preventDefault();
         nvUrlEditing = false;
@@ -1007,7 +1015,7 @@
       nvFrame.addEventListener("load", nvHandleFrameLoad);
       nvLoadHistory();
       nvRenderSuggestions();
-      if (!nvLoadState()) nvCreateTab("nav://home", "/nav/home", true);
+      if (!nvConsumeOpenParam() && !nvLoadState()) nvCreateTab("nav://home", "/nav/home", true);
     }();
   </script>
 </body>
