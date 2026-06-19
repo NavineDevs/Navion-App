@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.5"></script>
+  <script src="/nv.register.js?v=1.0.6"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -273,7 +273,6 @@
           if (!proxySrc || proxySrc.indexOf("/nv/") !== 0) return false;
           nvSetTabUrl(tab, bareTarget);
           tab.src = proxySrc;
-          nvSetFrameSource(proxySrc);
           nvSyncShellLocation(proxySrc, bareTarget);
           nvRenderTabs();
           nvSyncUi(tab);
