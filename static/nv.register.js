@@ -1,6 +1,16 @@
 (function () {
   if (!navigator.serviceWorker) return;
 
+  function isNavionWorker(registration) {
+    try {
+      var worker = registration && (registration.active || registration.waiting || registration.installing);
+      var script = worker && worker.scriptURL;
+      return typeof script === "string" && new URL(script, location.href).pathname === "/nv.sw.js";
+    } catch (e) {
+      return false;
+    }
+  }
+
   function registerNavionSw() {
     return navigator.serviceWorker.register("/nv.sw.js", {
       scope: "/",
@@ -27,14 +37,14 @@
   navigator.serviceWorker.getRegistration("/")
     .then(function (existing) {
       if (!existing) return registerNavionSw();
-      if (existing.active && existing.active.scriptURL.indexOf("/nv.sw.js") !== -1) {
+      if (isNavionWorker(existing)) {
         if (existing.waiting) {
           try { existing.waiting.postMessage({ type: "NV_SKIP_WAITING" }); } catch (e) {}
         }
         existing.update().catch(function () {});
         return existing;
       }
-      return existing.unregister().then(registerNavionSw);
+      return registerNavionSw();
     })
     .catch(function (err) {
       console.error("[Navion] Service Worker registration failed:", err);
