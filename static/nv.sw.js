@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.6";
+const CACHE_NAME = "navion-runtime-v1.0.7";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.6",
-  "/nv.register.js?v=1.0.6",
+  "/nv.client.js?v=1.0.7",
+  "/nv.register.js?v=1.0.7",
   "/nav/home",
   "/nav/error",
 ];
@@ -62,7 +62,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) {
+    if ((url.protocol === "http:" || url.protocol === "https:") && needsProxyCrossOriginHost(url.hostname)) {
+      event.respondWith(handleCrossOriginRequest(event.request, url));
+    }
+    return;
+  }
   if (url.pathname.startsWith(NAVION_PREFIX)) {
     event.respondWith(handleRequest(event));
     return;
@@ -86,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.6" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.6" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.7" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.7" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
