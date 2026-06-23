@@ -554,19 +554,23 @@
     patchSetAttribute();
     patchUrlProperties();
   }
-  patchFetch();
-  patchXhr();
-  patchRequest();
-  patchLocationMethods();
-  patchDynamicImport();
+  if (!passiveMode) {
+    patchFetch();
+    patchXhr();
+    patchRequest();
+    patchLocationMethods();
+    patchDynamicImport();
+  }
   if (shouldEnforceProxyLocation()) patchHistory();
   if (shouldEnforceProxyLocation()) patchNavigationApi();
-  patchWindowOpen();
-  patchConstructor("EventSource");
-  patchConstructor("Worker");
-  patchConstructor("SharedWorker");
-  patchConstructor("WebSocket");
-  patchConstructor("Image");
+  if (!passiveMode) {
+    patchWindowOpen();
+    patchConstructor("EventSource");
+    patchConstructor("Worker");
+    patchConstructor("SharedWorker");
+    patchConstructor("WebSocket");
+    patchConstructor("Image");
+  }
   bindNavigationEvents();
   if (!lightMode) rewriteCurrentDocument();
   if (!lightMode) observeDom();
