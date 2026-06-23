@@ -46,6 +46,18 @@ npm start
 Server default:
 - `http://localhost:8090`
 
+## ISP-blocked sites (pornhub, hanime, etc.)
+
+If direct upstream fetches fail with `ECONNRESET`, start Navion-App with a local VPN/Tor/SOCKS proxy:
+
+```bash
+set NAVION_UPSTREAM_PROXY=socks5://127.0.0.1:1080
+set NAVION_UPSTREAM_PROXY_AUTO=1
+npm start
+```
+
+See `../Navion/README.md` for all `NAVION_UPSTREAM_PROXY_*` options. Check `http://localhost:8090/api/navion-status` for `upstreamProxy.enabled`.
+
 ## Key routes
 
 - `/` - NAVION browser shell
