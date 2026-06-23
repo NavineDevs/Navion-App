@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.7";
+const CACHE_NAME = "navion-runtime-v1.0.8";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.7",
-  "/nv.register.js?v=1.0.7",
+  "/nv.client.js?v=1.0.8",
+  "/nv.register.js?v=1.0.8",
   "/nav/home",
   "/nav/error",
 ];
@@ -63,8 +63,8 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (url.origin !== self.location.origin) {
-    if ((url.protocol === "http:" || url.protocol === "https:") && needsProxyCrossOriginHost(url.hostname)) {
-      event.respondWith(handleCrossOriginRequest(event.request, url));
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      event.respondWith(handleCrossOriginRequest(event, event.request, url));
     }
     return;
   }
@@ -91,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.7" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.7" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.8" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.8" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -113,7 +113,16 @@ async function handleLocalRequest(request, url) {
   }
 }
 
-async function handleCrossOriginRequest(request, requestUrl) {
+async function handleCrossOriginRequest(event, request, requestUrl) {
+  if (!needsProxyCrossOriginHost(requestUrl.hostname)) {
+    if (shouldUseDirectCrossOrigin(requestUrl)) return safeFetch(request);
+    const baseUrl = await resolveBaseUrl(event);
+    if (!baseUrl || !shouldProxyEscapedFromBase(baseUrl)) return safeFetch(request);
+  }
+  return proxyCrossOriginRequest(request, requestUrl);
+}
+
+async function proxyCrossOriginRequest(request, requestUrl) {
   if (!needsProxyCrossOriginHost(requestUrl.hostname) && shouldUseDirectCrossOrigin(requestUrl)) {
     return safeFetch(request);
   }
@@ -208,6 +217,52 @@ function needsProxyCrossOriginHost(hostname) {
     host.endsWith(".doubleclick.net") ||
     host.indexOf("youtube") !== -1
   );
+}
+
+function isAdultProxyHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return (
+    host === "pornhub.com" ||
+    host.endsWith(".pornhub.com") ||
+    host.endsWith(".phncdn.com") ||
+    host.endsWith(".phprcdn.com") ||
+    host.endsWith(".trafficjunky.net") ||
+    host === "xvideos.com" ||
+    host.endsWith(".xvideos.com") ||
+    host.endsWith(".xvideos-cdn.com") ||
+    host === "xhamster.com" ||
+    host.endsWith(".xhamster.com") ||
+    host === "xhamster.desi" ||
+    host.endsWith(".xhamster.desi") ||
+    host === "eporner.com" ||
+    host.endsWith(".eporner.com") ||
+    host === "redtube.com" ||
+    host.endsWith(".redtube.com") ||
+    host === "spankbang.com" ||
+    host.endsWith(".spankbang.com") ||
+    host === "xnxx.com" ||
+    host.endsWith(".xnxx.com") ||
+    host === "uncensoredhentai.xxx" ||
+    host.endsWith(".uncensoredhentai.xxx") ||
+    host === "hentaihaven.xxx" ||
+    host.endsWith(".hentaihaven.xxx") ||
+    host === "hanime.tv" ||
+    host.endsWith(".hanime.tv") ||
+    host.endsWith(".hstream.moe") ||
+    host.endsWith(".sb-cd.com") ||
+    host.endsWith(".streamsb.net") ||
+    host.endsWith(".doodstream.com") ||
+    host.endsWith(".doodcdn.co")
+  );
+}
+
+function shouldProxyEscapedFromBase(baseUrl) {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return needsProxyCrossOriginHost(host) || isAdultProxyHost(host);
+  } catch {
+    return false;
+  }
 }
 
 function shouldUseDirectCrossOrigin(url) {

@@ -14,6 +14,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "navion": "^1.0.7"
+    "navion": "^1.0.8"
   }
 }
