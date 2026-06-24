@@ -19,6 +19,26 @@
     .nv-meta a { color: #9db0ff; }
     .nv-status { margin-top: 10px; font-size: 13px; color: #c5cffb; }
     .nv-status strong { color: #b8c4ff; }
+    .nv-proxy {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 1px solid #3d4778;
+      border-radius: 10px;
+      background: #141a31;
+      color: #c5cffb;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .nv-proxy code {
+      display: block;
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #0f1220;
+      color: #dbe3ff;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>
@@ -33,6 +53,11 @@
         <a class="nv-btn nv-btn-alt" href="/">Go to Navion Home</a>
       </div>
       <div class="nv-status" id="nvStatus"><strong>Status:</strong> Checking core availability...</div>
+      <div class="nv-proxy" id="nvProxyHelp" hidden>
+        <strong>Upstream proxy required</strong>
+        <div id="nvProxyText"></div>
+        <code id="nvProxyCmd"></code>
+      </div>
       <div class="nv-meta">
         Company: <strong>Navine</strong><br>
         Lead Dev: <strong>HitBoyXx23</strong><br>
@@ -99,11 +124,19 @@
         var decodedUrl = decodeToken(encoded);
         var textEl = document.getElementById("nvErrorText");
         var codeEl = document.getElementById("nvErrorCode");
+        var proxyHelp = document.getElementById("nvProxyHelp");
+        var proxyText = document.getElementById("nvProxyText");
+        var proxyCmd = document.getElementById("nvProxyCmd");
         if (textEl) {
           var extra = decodedUrl ? " Target: " + decodedUrl : "";
           textEl.textContent = message + extra;
         }
         if (codeEl) codeEl.innerHTML = "<strong>Code:</strong> " + code;
+        if (code === "ISP_BLOCKED" && proxyHelp && proxyText && proxyCmd) {
+          proxyHelp.hidden = false;
+          proxyText.textContent = "Navion could not open this host directly. Route blocked sites through a local VPN, Tor, or SOCKS5/HTTP proxy, then restart Navion-App.";
+          proxyCmd.textContent = "set NAVION_UPSTREAM_PROXY=socks5://127.0.0.1:1080\nset NAVION_UPSTREAM_PROXY_AUTO=1\nnpm start";
+        }
       }
 
       var retryHref = getRetryTarget();

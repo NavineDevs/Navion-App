@@ -87,19 +87,33 @@ Use the shell as a thin layer and keep custom logic in your own modules:
 
 ## Use Navion Core as the app dependency
 
-`package.json` uses the local core package:
+Published installs use npm:
 
 ```json
 {
   "dependencies": {
-    "navion": "file:../Navion"
+    "navion": "^1.0.12"
   }
 }
 ```
 
-Install it from this folder:
+Local development with a sibling `../Navion` checkout:
 
 ```bash
+npm install
+```
+
+When `../Navion` exists, `postinstall` links the local core automatically. Force local core:
+
+```bash
+set NAVION_USE_LOCAL_CORE=1
+npm run link:core
+```
+
+Use the published npm core instead of the local checkout:
+
+```bash
+set NAVION_USE_NPM_CORE=1
 npm install
 ```
 

@@ -6,7 +6,7 @@ export function getNavionAppRuntime() {
   return {
     name: "Navion-App",
     layer: "app-shell",
-    version: "1.0.0",
+    version: "1.0.1",
     host: NAVION_APP_CONFIG.bindHost,
     port: NAVION_APP_CONFIG.port,
     coreImport: NAVION_APP_CONFIG.coreImportPath,
