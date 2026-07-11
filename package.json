@@ -1,6 +1,6 @@
 {
   "name": "navion-app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Navion App",
   "main": "server.js",
   "type": "module",
@@ -9,7 +9,7 @@
     "check": "node --check server.js",
     "postinstall": "node scripts/resolve-core-dep.mjs",
     "link:core": "npm install file:../Navion",
-    "use:npm-core": "set NAVION_USE_NPM_CORE=1&& npm install navion@^1.0.12"
+    "use:npm-core": "set NAVION_USE_NPM_CORE=1&& npm install navion@^1.0.13"
   },
   "author": "Navine",
   "license": "MIT",

@@ -1,12 +1,13 @@
 import { NAVION_APP_CONFIG } from "./config/app.config.js";
-import { createUpstreamProxyConfig } from "navion/config";
+import { createUpstreamProxyConfig, createDohConfig } from "navion/config";
 
 export function getNavionAppRuntime() {
   const upstreamProxy = createUpstreamProxyConfig(process.env);
+  const dns = createDohConfig(process.env);
   return {
     name: "Navion-App",
     layer: "app-shell",
-    version: "1.0.1",
+    version: "1.0.2",
     host: NAVION_APP_CONFIG.bindHost,
     port: NAVION_APP_CONFIG.port,
     coreImport: NAVION_APP_CONFIG.coreImportPath,
@@ -15,6 +16,10 @@ export function getNavionAppRuntime() {
       all: upstreamProxy.all,
       auto: upstreamProxy.auto,
       hostRules: upstreamProxy.hosts.length,
+    },
+    dns: {
+      doh: Boolean(dns.enabled),
+      endpoints: dns.endpoints.length,
     },
   };
 }
