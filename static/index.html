@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.12"></script>
+  <script src="/nv.register.js?v=1.0.15"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -271,6 +271,10 @@
           var bareTarget = new URL(framePath + (frameSearch || "") + (frameHash || ""), tab.url || "https://www.youtube.com/").href;
           var proxySrc = nvYoutubeProxySrc(bareTarget);
           if (!proxySrc || proxySrc.indexOf("/nv/") !== 0) return false;
+          var repairKey = proxySrc;
+          if (repairKey === nvLastYouTubeRepairKey && Date.now() - nvLastYouTubeRepairAt < 5000) return true;
+          nvLastYouTubeRepairKey = repairKey;
+          nvLastYouTubeRepairAt = Date.now();
           nvSetTabUrl(tab, bareTarget);
           tab.src = proxySrc;
           nvSyncShellLocation(proxySrc, bareTarget);
@@ -606,6 +610,8 @@
       var nvHistoryItems = [];
       var nvPendingFrameSrc = "";
       var nvLastFrameSetAt = 0;
+      var nvLastYouTubeRepairKey = "";
+      var nvLastYouTubeRepairAt = 0;
 
       function nvSetFrameSource(src) {
         if (!src) return;
@@ -894,7 +900,7 @@
           nvSaveState();
         }
       });
-      setInterval(function () { nvGuardFrameNavigation(); }, 900);
+      setInterval(function () { nvGuardFrameNavigation(); }, 2500);
       function nvHandleFrameLoad() {
         try {
           if (String(nvFrame.contentWindow.location.href || "") === "about:blank") return;
@@ -961,7 +967,6 @@
                 tab.src = maskedProxy;
                 if (!nvUrlEditing) nvUrl.value = maskedUrl;
                 nvSyncShellLocation(maskedProxy, maskedUrl);
-                nvSetFrameSource(maskedProxy);
                 nvRenderTabs();
                 nvSyncUi(tab);
                 nvTrackHistory(maskedUrl);

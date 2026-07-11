@@ -495,8 +495,7 @@
   }
 
   function shouldEnforceProxyLocation() {
-    if (!passiveMode) return true;
-    return isYouTubeSiteBase(currentBase());
+    return false;
   }
 
   function cleanupSiteOverlays() {
@@ -578,11 +577,9 @@
   cleanupSiteOverlays();
 
   window.addEventListener("load", emitLocation, true);
-  if (shouldEnforceProxyLocation()) window.addEventListener("load", enforceProxyLocation, true);
   window.addEventListener("load", cleanupSiteOverlays, true);
   window.addEventListener("hashchange", emitLocation, true);
   window.addEventListener("popstate", emitLocation, true);
-  if (shouldEnforceProxyLocation()) setInterval(enforceProxyLocation, 2000);
   setInterval(cleanupSiteOverlays, 1500);
   setTimeout(emitLocation, 0);
 })();

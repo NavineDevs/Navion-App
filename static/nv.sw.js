@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.12";
+const CACHE_NAME = "navion-runtime-v1.0.15";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.12",
-  "/nv.register.js?v=1.0.12",
+  "/nv.client.js?v=1.0.15",
+  "/nv.register.js?v=1.0.15",
   "/nav/home",
   "/nav/error",
 ];
@@ -91,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.12" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.12" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.15" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.15" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -259,7 +259,7 @@ function isAdultProxyHost(hostname) {
 function shouldProxyEscapedFromBase(baseUrl) {
   try {
     const host = new URL(baseUrl).hostname.toLowerCase();
-    return needsProxyCrossOriginHost(host) || isAdultProxyHost(host);
+    return needsProxyCrossOriginHost(host) || isAdultProxyHost(host) || host.endsWith(".vercel.app");
   } catch {
     return false;
   }
