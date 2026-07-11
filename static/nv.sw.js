@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.17";
+const CACHE_NAME = "navion-runtime-v1.0.19";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.17",
-  "/nv.register.js?v=1.0.17",
+  "/nv.client.js?v=1.0.19",
+  "/nv.register.js?v=1.0.19",
   "/nav/home",
   "/nav/error",
 ];
@@ -91,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.17" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.17" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.19" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.19" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -253,7 +253,9 @@ function isAdultProxyHost(hostname) {
     host.endsWith(".sb-cd.com") ||
     host.endsWith(".streamsb.net") ||
     host.endsWith(".doodstream.com") ||
-    host.endsWith(".doodcdn.co")
+    host.endsWith(".doodcdn.co") ||
+    host.endsWith(".htstreaming.com") ||
+    host.endsWith(".1hanime.com")
   );
 }
 
@@ -379,31 +381,67 @@ function resolveKnownAssetTarget(url, baseUrl) {
   return null;
 }
 
+function tryDecodeNavionToken(rawToken) {
+  let token = rawToken;
+  try { token = decodeURIComponent(rawToken); } catch {}
+  try {
+    const decoded = /^https?:\/\//i.test(token) ? token : swDecode(token);
+    if (decoded && /^https?:\/\//i.test(decoded)) return decoded;
+  } catch {}
+  return null;
+}
+
+function isExactNavionToken(rawToken, decoded) {
+  if (!decoded) return false;
+  try {
+    return swEncode(decoded) === rawToken;
+  } catch {
+    return false;
+  }
+}
+
+function splitNavionRawPath(rawPath) {
+  const slash = rawPath.indexOf("/");
+  if (slash >= 0) return { rawToken: rawPath.slice(0, slash), suffix: rawPath.slice(slash) };
+  const markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
+  for (const marker of markers) {
+    const index = rawPath.indexOf(marker);
+    if (index > 0) return { rawToken: rawPath.slice(0, index), suffix: "/" + rawPath.slice(index) };
+  }
+  const full = tryDecodeNavionToken(rawPath);
+  if (full && isExactNavionToken(rawPath, full)) return { rawToken: rawPath, suffix: "" };
+  for (let i = rawPath.length - 1; i >= 12; i--) {
+    const candidate = rawPath.slice(0, i);
+    const decoded = tryDecodeNavionToken(candidate);
+    if (decoded && decoded.endsWith("/") && isExactNavionToken(candidate, decoded) && rawPath.slice(i)) {
+      return { rawToken: candidate, suffix: rawPath.slice(i) };
+    }
+  }
+  return { rawToken: rawPath, suffix: "" };
+}
+
+function applyNavionSuffix(target, suffix) {
+  if (!suffix) return target;
+  let piece = suffix;
+  if (!piece.startsWith("/")) piece = "/" + piece;
+  const suffixUrl = new URL(piece, "https://navion.invalid");
+  target.pathname = target.pathname.replace(/\/?$/, "") + suffixUrl.pathname;
+  if (suffixUrl.search) target.search = suffixUrl.search;
+  if (suffixUrl.hash) target.hash = suffixUrl.hash;
+  return target;
+}
+
 function resolveTargetFromNavionUrl(url) {
   if (!url.pathname.startsWith(NAVION_PREFIX)) return null;
   const rawPath = url.pathname.slice(NAVION_PREFIX.length);
   if (!rawPath) return null;
-  const slash = rawPath.indexOf("/");
-  let rawToken = slash === -1 ? rawPath : rawPath.slice(0, slash);
-  let suffix = slash === -1 ? "" : rawPath.slice(slash);
-  if (!suffix) {
-    const markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
-    for (const marker of markers) {
-      const index = rawPath.indexOf(marker);
-      if (index > 0) {
-        rawToken = rawPath.slice(0, index);
-        suffix = "/" + rawPath.slice(index);
-        break;
-      }
-    }
-  }
+  const { rawToken, suffix } = splitNavionRawPath(rawPath);
   let token = rawToken;
   try { token = decodeURIComponent(rawToken); } catch {}
   const decoded = /^https?:\/\//i.test(token) ? token : swDecode(token);
   if (!decoded || !/^https?:\/\//i.test(decoded)) return null;
   try {
-    const target = new URL(decoded);
-    if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
+    const target = applyNavionSuffix(new URL(decoded), suffix);
     if (url.search && !target.search) target.search = url.search;
     return target.href;
   } catch {

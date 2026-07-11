@@ -48,6 +48,8 @@
       host.endsWith(".nhplayer.com") ||
       host.endsWith(".uncensoredhentai.xxx") ||
       host === "uncensoredhentai.xxx" ||
+      host.endsWith(".htstreaming.com") ||
+      host.endsWith(".1hanime.com") ||
       host.endsWith(".vercel.app")
     );
   }
@@ -136,23 +138,59 @@
     }
   }
 
+  function tryDecodeToken(rawToken) {
+    try {
+      var token = decodeURIComponent(rawToken);
+      var decoded = /^https?:\/\//i.test(token) ? token : decodeToken(token);
+      if (/^https?:\/\//i.test(decoded)) return decoded;
+    } catch (_e0) {}
+    try {
+      var decoded2 = /^https?:\/\//i.test(rawToken) ? rawToken : decodeToken(rawToken);
+      if (/^https?:\/\//i.test(decoded2)) return decoded2;
+    } catch (_e1) {}
+    return "";
+  }
+
+  function isExactToken(rawToken, decoded) {
+    try { return encodeURIComponent(decoded) && btoa(encodeURIComponent(decoded)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "") === rawToken; } catch (_e) { return false; }
+  }
+
+  function splitNavionRawPath(rawPath) {
+    var slash = rawPath.indexOf("/");
+    if (slash >= 0) return { rawToken: rawPath.slice(0, slash), suffix: rawPath.slice(slash) };
+    var markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
+    for (var i = 0; i < markers.length; i++) {
+      var index = rawPath.indexOf(markers[i]);
+      if (index > 0) return { rawToken: rawPath.slice(0, index), suffix: "/" + rawPath.slice(index) };
+    }
+    var full = tryDecodeToken(rawPath);
+    if (full && isExactToken(rawPath, full)) return { rawToken: rawPath, suffix: "" };
+    for (var j = rawPath.length - 1; j >= 12; j--) {
+      var cand = rawPath.slice(0, j);
+      var dec = tryDecodeToken(cand);
+      if (dec && dec.charAt(dec.length - 1) === "/" && isExactToken(cand, dec) && rawPath.slice(j)) {
+        return { rawToken: cand, suffix: rawPath.slice(j) };
+      }
+    }
+    return { rawToken: rawPath, suffix: "" };
+  }
+
+  function applyNavionSuffix(target, suffix) {
+    if (!suffix) return target;
+    var piece = suffix.charAt(0) === "/" ? suffix : "/" + suffix;
+    var suffixUrl = new URL(piece, "https://navion.invalid");
+    target.pathname = target.pathname.replace(/\/?$/, "") + suffixUrl.pathname;
+    if (suffixUrl.search) target.search = suffixUrl.search;
+    if (suffixUrl.hash) target.hash = suffixUrl.hash;
+    return target;
+  }
+
   function decodeFromPath(pathname, search, hash) {
     if (typeof pathname !== "string" || pathname.indexOf("/nv/") !== 0) return "";
     var rawPath = pathname.slice(4);
-    var slash = rawPath.indexOf("/");
-    var rawToken = slash < 0 ? rawPath : rawPath.slice(0, slash);
-    var suffix = slash < 0 ? "" : rawPath.slice(slash);
-    if (!suffix) {
-      var markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
-      for (var i = 0; i < markers.length; i++) {
-        var index = rawPath.indexOf(markers[i]);
-        if (index > 0) {
-          rawToken = rawPath.slice(0, index);
-          suffix = "/" + rawPath.slice(index);
-          break;
-        }
-      }
-    }
+    var split = splitNavionRawPath(rawPath);
+    var rawToken = split.rawToken;
+    var suffix = split.suffix;
     try { rawToken = decodeURIComponent(rawToken); } catch (_e0) {}
     var decoded = /^https?:\/\//i.test(rawToken) ? rawToken : decodeToken(rawToken);
     if (!/^https?:\/\//i.test(decoded)) return "";
@@ -169,7 +207,7 @@
     }
     try {
       var target = new URL(decoded);
-      if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
+      applyNavionSuffix(target, suffix);
       if (search && !target.search) target.search = search;
       if (hash) target.hash = hash;
       var host = target.hostname.toLowerCase();
@@ -508,7 +546,11 @@
   }
 
   function shouldEnforceProxyLocation() {
-    return isYouTubeSiteBase(currentBase());
+    try {
+      return isYouTubeSiteBase(currentBase()) || needsProxyHost(new URL(currentBase()).hostname);
+    } catch (_e) {
+      return isYouTubeSiteBase(currentBase());
+    }
   }
 
   function cleanupSiteOverlays() {
@@ -549,7 +591,7 @@
     if (LOCAL_ALLOW[window.location.pathname]) return;
     var base = currentBase();
     if (!/^https?:\/\//i.test(base)) return;
-    if (!isYouTubeSiteBase(base)) return;
+    if (!shouldEnforceProxyLocation()) return;
     try {
       var target = new URL(window.location.pathname + window.location.search + window.location.hash, base);
       var next = "/nv/" + cfg.encode(target.origin + "/") + target.pathname + target.search + target.hash;
@@ -570,13 +612,13 @@
     patchFetch();
     patchXhr();
     patchRequest();
-    patchLocationMethods();
     patchDynamicImport();
   }
+  patchLocationMethods();
+  patchWindowOpen();
   if (shouldEnforceProxyLocation()) patchHistory();
   if (shouldEnforceProxyLocation()) patchNavigationApi();
   if (!passiveMode) {
-    patchWindowOpen();
     patchConstructor("EventSource");
     patchConstructor("Worker");
     patchConstructor("SharedWorker");

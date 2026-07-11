@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.17"></script>
+  <script src="/nv.register.js?v=1.0.19"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -136,6 +136,49 @@
           return "";
         }
       }
+      function nvTryDecodeToken(rawToken) {
+        try {
+          var token = decodeURIComponent(rawToken);
+          var decoded = /^https?:\/\//i.test(token) ? token : nvDecode(token);
+          if (/^https?:\/\//i.test(decoded)) return decoded;
+        } catch (x0) {}
+        try {
+          var decoded2 = /^https?:\/\//i.test(rawToken) ? rawToken : nvDecode(rawToken);
+          if (/^https?:\/\//i.test(decoded2)) return decoded2;
+        } catch (x1) {}
+        return "";
+      }
+      function nvIsExactToken(rawToken, decoded) {
+        try { return nvEncode(decoded) === rawToken; } catch (e) { return false; }
+      }
+      function nvSplitNavionRawPath(rawPath) {
+        var slash = rawPath.indexOf("/");
+        if (slash >= 0) return { rawToken: rawPath.slice(0, slash), suffix: rawPath.slice(slash) };
+        var markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
+        for (var mi = 0; mi < markers.length; mi++) {
+          var index = rawPath.indexOf(markers[mi]);
+          if (index > 0) return { rawToken: rawPath.slice(0, index), suffix: "/" + rawPath.slice(index) };
+        }
+        var full = nvTryDecodeToken(rawPath);
+        if (full && nvIsExactToken(rawPath, full)) return { rawToken: rawPath, suffix: "" };
+        for (var j = rawPath.length - 1; j >= 12; j--) {
+          var cand = rawPath.slice(0, j);
+          var dec = nvTryDecodeToken(cand);
+          if (dec && dec.charAt(dec.length - 1) === "/" && nvIsExactToken(cand, dec) && rawPath.slice(j)) {
+            return { rawToken: cand, suffix: rawPath.slice(j) };
+          }
+        }
+        return { rawToken: rawPath, suffix: "" };
+      }
+      function nvApplyNavionSuffix(target, suffix) {
+        if (!suffix) return target;
+        var piece = suffix.charAt(0) === "/" ? suffix : "/" + suffix;
+        var suffixUrl = new URL(piece, "https://navion.invalid");
+        target.pathname = target.pathname.replace(/\/?$/, "") + suffixUrl.pathname;
+        if (suffixUrl.search) target.search = suffixUrl.search;
+        if (suffixUrl.hash) target.hash = suffixUrl.hash;
+        return target;
+      }
       function nvDecodeProxyUrl(rawHref) {
         if (!rawHref) return "";
         try {
@@ -143,25 +186,14 @@
           if (parsed.origin !== window.location.origin) return "";
           if (parsed.pathname.indexOf("/nv/") !== 0) return "";
           var rawPath = parsed.pathname.slice(4);
-          var slash = rawPath.indexOf("/");
-          var rawToken = slash < 0 ? rawPath : rawPath.slice(0, slash);
-          var suffix = slash < 0 ? "" : rawPath.slice(slash);
-          if (!suffix) {
-            var markers = ["dist/", "_next/", "country.json", "duckchat/", "static/"];
-            for (var i = 0; i < markers.length; i++) {
-              var index = rawPath.indexOf(markers[i]);
-              if (index > 0) {
-                rawToken = rawPath.slice(0, index);
-                suffix = "/" + rawPath.slice(index);
-                break;
-              }
-            }
-          }
+          var split = nvSplitNavionRawPath(rawPath);
+          var rawToken = split.rawToken;
+          var suffix = split.suffix;
           try { rawToken = decodeURIComponent(rawToken); } catch (x0) {}
           var decoded = /^https?:\/\//i.test(rawToken) ? rawToken : nvDecode(rawToken);
           if (!/^https?:\/\//i.test(decoded)) return "";
           var target = new URL(decoded);
-          if (suffix) target.pathname = target.pathname.replace(/\/?$/, "") + decodeURI(suffix);
+          nvApplyNavionSuffix(target, suffix);
           if (parsed.search) target.search = parsed.search;
           if (parsed.hash) target.hash = parsed.hash;
           if ((target.hostname === "duckduckgo.com" || target.hostname === "www.duckduckgo.com" || target.hostname === "html.duckduckgo.com") && (target.pathname === "/ai" || target.pathname.indexOf("/ai/") === 0 || target.searchParams.get("duckai") === "1" || target.searchParams.get("ia") === "chat" || target.searchParams.get("iax") === "chat")) {
@@ -833,8 +865,7 @@
           }
         } catch (e) {}
         if (asPath.indexOf("/nv/") === 0) {
-          var encodedPart = asPath.slice(4).split("?")[0].split("#")[0];
-          var decoded = nvDecode(encodedPart);
+          var decoded = nvDecodeProxyUrl(asPath);
           for (var i = 0; i < nvTabsState.length; i++) {
             if (nvTabsState[i] && nvTabsState[i].src === asPath) {
               nvActivateTab(nvTabsState[i].id);
