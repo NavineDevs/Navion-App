@@ -9,7 +9,7 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.15"></script>
+  <script src="/nv.register.js?v=1.0.17"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -519,7 +519,7 @@
             var visibleTarget = new URL(visibleUrl.pathname + visibleUrl.search + visibleUrl.hash, tab.url).href;
             tab.url = visibleTarget;
             tab.label = nvDisplayLabel(visibleTarget);
-            if (!nvUrlEditing) nvUrl.value = visibleTarget;
+            if (!nvUrlEditing) nvUrl.value = nvBarDisplay(tab);
             nvRenderTabs();
             nvSyncUi(tab);
             nvSaveState();
@@ -749,9 +749,13 @@
         nvTabs.appendChild(add);
       }
 
+      function nvBarDisplay(tab) {
+        if (!tab) return "";
+        return tab.label || nvDisplayLabel(tab.url);
+      }
       function nvSyncUi(tab) {
         if (!tab) return;
-        if (!nvUrlEditing) nvUrl.value = tab.url;
+        if (!nvUrlEditing) nvUrl.value = nvBarDisplay(tab);
         document.title = "Navion - " + tab.label;
       }
 
@@ -864,7 +868,11 @@
         if (!nvUrl.value || !nvUrl.value.trim()) return;
         nvOpen(nvUrl.value);
       };
-      nvUrl.addEventListener("focus", function () { nvUrlEditing = true; });
+      nvUrl.addEventListener("focus", function () {
+        nvUrlEditing = true;
+        var tab = nvFindTab(nvActiveTabId);
+        if (tab && tab.url) nvUrl.value = tab.url;
+      });
       nvUrl.addEventListener("blur", function () { nvUrlEditing = false; });
       nvBackBtn.onclick = function () { try { nvFrame.contentWindow.history.back(); } catch (e) {} };
       nvForwardBtn.onclick = function () { try { nvFrame.contentWindow.history.forward(); } catch (e) {} };
@@ -926,7 +934,6 @@
               active.url = out;
               active.label = nvDisplayLabel(out);
               active.src = path + search + hash;
-              nvUrl.value = out;
               nvSyncShellLocation(active.src, out);
               nvRenderTabs();
               nvSyncUi(active);
@@ -943,7 +950,7 @@
             if (activeNav) {
               activeNav.url = path === "/nav/home" ? "nav://home" : "nav://error";
               activeNav.label = nvDisplayLabel(activeNav.url);
-              if (!nvUrlEditing) nvUrl.value = activeNav.url;
+              if (!nvUrlEditing) nvUrl.value = nvBarDisplay(activeNav);
               nvRenderTabs();
               nvSyncUi(activeNav);
               nvSaveState();
@@ -965,7 +972,6 @@
                 tab.url = maskedUrl;
                 tab.label = nvDisplayLabel(maskedUrl);
                 tab.src = maskedProxy;
-                if (!nvUrlEditing) nvUrl.value = maskedUrl;
                 nvSyncShellLocation(maskedProxy, maskedUrl);
                 nvRenderTabs();
                 nvSyncUi(tab);
@@ -993,7 +999,6 @@
                 var inferred = new URL(path + search + hash, tab.url).href;
                 tab.url = inferred;
                 tab.label = nvDisplayLabel(inferred);
-                nvUrl.value = inferred;
                 nvRenderTabs();
                 nvSyncUi(tab);
                 nvTrackHistory(inferred);

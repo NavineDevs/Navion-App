@@ -35,7 +35,20 @@
       host.endsWith(".ggpht.com") ||
       host.endsWith(".googleapis.com") ||
       host.endsWith(".doubleclick.net") ||
-      host.indexOf("youtube") !== -1
+      host.indexOf("youtube") !== -1 ||
+      host.endsWith(".phncdn.com") ||
+      host.endsWith(".phprcdn.com") ||
+      host.endsWith(".trafficjunky.net") ||
+      host.endsWith(".pornhub.com") ||
+      host === "pornhub.com" ||
+      host.endsWith(".sb-cd.com") ||
+      host.endsWith(".streamsb.net") ||
+      host.endsWith(".doodstream.com") ||
+      host.endsWith(".doodcdn.co") ||
+      host.endsWith(".nhplayer.com") ||
+      host.endsWith(".uncensoredhentai.xxx") ||
+      host === "uncensoredhentai.xxx" ||
+      host.endsWith(".vercel.app")
     );
   }
 
@@ -495,7 +508,7 @@
   }
 
   function shouldEnforceProxyLocation() {
-    return false;
+    return isYouTubeSiteBase(currentBase());
   }
 
   function cleanupSiteOverlays() {
