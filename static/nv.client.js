@@ -5,7 +5,7 @@
   window.__navionClientRuntime = cfg;
   var mode = cfg.mode || "full";
   var passiveMode = mode === "lite-nav";
-  var lightMode = mode === "lite" || passiveMode;
+  var lightMode = mode === "lite";
   var navigationRedirecting = false;
   var lastEnforcedProxyPath = "";
   var nativeHistoryReplace = null;
@@ -614,7 +614,36 @@
     patchRequest();
     patchDynamicImport();
   }
+  function patchTopNavigation() {
+    if (window.top === window) return;
+    try {
+      var topWin = window.top;
+      if (!topWin || !topWin.location) return;
+      ["assign", "replace"].forEach(function (method) {
+        var native = topWin.location[method];
+        if (typeof native !== "function") return;
+        topWin.location[method] = function (url) {
+          if (typeof url === "string" && needsProxyHistoryRewrite(url)) url = rewriteUrl(url);
+          return window.location[method](url);
+        };
+      });
+      var desc = Object.getOwnPropertyDescriptor(window.Location.prototype, "href");
+      if (desc && typeof desc.set === "function" && typeof desc.get === "function") {
+        Object.defineProperty(topWin.location, "href", {
+          configurable: true,
+          enumerable: desc.enumerable,
+          get: desc.get.bind(topWin.location),
+          set: function (value) {
+            if (typeof value === "string" && needsProxyHistoryRewrite(value)) value = rewriteUrl(value);
+            return window.location.assign(value);
+          },
+        });
+      }
+    } catch (_e) {}
+  }
+
   patchLocationMethods();
+  patchTopNavigation();
   patchWindowOpen();
   if (shouldEnforceProxyLocation()) patchHistory();
   if (shouldEnforceProxyLocation()) patchNavigationApi();
