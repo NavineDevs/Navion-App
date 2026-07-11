@@ -248,6 +248,7 @@ function isAdultProxyHost(hostname) {
     host.endsWith(".hentaihaven.xxx") ||
     host === "hanime.tv" ||
     host.endsWith(".hanime.tv") ||
+    host === "hstream.moe" ||
     host.endsWith(".hstream.moe") ||
     host.endsWith(".sb-cd.com") ||
     host.endsWith(".streamsb.net") ||
