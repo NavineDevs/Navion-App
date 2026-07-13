@@ -50,6 +50,11 @@
       host === "uncensoredhentai.xxx" ||
       host.endsWith(".htstreaming.com") ||
       host.endsWith(".1hanime.com") ||
+      host.endsWith(".hstream.moe") ||
+      host === "hstream.moe" ||
+      host.endsWith(".hanime.tv") ||
+      host === "hanime.tv" ||
+      host.endsWith("-h.xyz") ||
       host.endsWith(".vercel.app")
     );
   }
@@ -101,6 +106,25 @@
     }
   }
 
+  function hcdnRoot() {
+    try {
+      var res = performance.getEntriesByType("resource");
+      for (var i = res.length - 1; i >= 0; i--) {
+        var n = String(res[i].name || "");
+        if (n.indexOf("/nv/") !== 0 || n.indexOf("-h.xyz") < 0 || n.indexOf("manifest.mpd") < 0) continue;
+        var tok = n.slice(4).split("/")[0];
+        var dec = tryDecodeToken(tok);
+        if (!dec) continue;
+        var extra = n.slice(4 + tok.length);
+        var full = dec.replace(/\/?$/, "") + extra;
+        var fu = new URL(full);
+        var bits = fu.pathname.split("/").filter(Boolean);
+        if (bits.length) return fu.origin + "/" + bits[0];
+      }
+    } catch (_e) {}
+    return "";
+  }
+
   function rewriteUrl(value) {
     if (typeof value !== "string") return value;
     if (!value.trim()) return value;
@@ -114,6 +138,17 @@
     }
     var base = currentBase();
     try {
+      if (value.indexOf("/nv/") !== 0 && /(?:manifest\.mpd|\.m3u8|chunk-stream|init-stream|\.webp)/i.test(value)) {
+        var mediaRoot = hcdnRoot();
+        if (mediaRoot) {
+          var joined = value.charAt(0) === "/" ? mediaRoot + value : mediaRoot + "/" + value;
+          return cfg.rewrite(joined, base || cfg.base || window.location.href);
+        }
+      }
+      if (value.charAt(0) === "/" && value.indexOf("/nv/") !== 0 && !LOCAL_ALLOW[value.split("?")[0]]) {
+        var root = hcdnRoot();
+        if (root) return cfg.rewrite(root + value, base || cfg.base || window.location.href);
+      }
       var parsed = new URL(value, window.location.href);
       if (parsed.origin === window.location.origin) {
         if (!LOCAL_ALLOW[parsed.pathname]) {
@@ -415,6 +450,12 @@
       if (!el) return;
       var href = el.getAttribute("href");
       if (!href || href.indexOf("javascript:") === 0 || href.indexOf("#") === 0) return;
+      if (isYouTubeSiteBase(currentBase()) && isAlreadyProxyUrl(href)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.location.assign(href);
+        return;
+      }
       var rewritten = rewriteUrl(href);
       if (el.getAttribute("target")) el.setAttribute("target", "_self");
       if (rewritten !== href) {
