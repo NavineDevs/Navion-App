@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-runtime-v1.0.23";
+const CACHE_NAME = "navion-app-runtime-v1.0.4";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.23",
-  "/nv.register.js?v=1.0.23",
+  "/nv.client.js?v=1.0.24",
+  "/nv.register.js?v=1.0.24",
   "/nav/home",
   "/nav/error",
 ];
@@ -91,8 +91,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.23" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.23" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.24" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.24" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
@@ -820,7 +820,12 @@ function offlineResponse(request, message, status) {
 async function handleRequest(event) {
   const request = event.request;
   const url = new URL(request.url);
-  if (request.mode === "navigate" && request.destination === "document") {
+  let shellFrameNavigation = false;
+  try {
+    const referrer = new URL(request.referrer || "", self.location.origin);
+    shellFrameNavigation = referrer.origin === self.location.origin && (referrer.pathname === "/app" || referrer.pathname === "/index.html");
+  } catch {}
+  if (request.mode === "navigate" && request.destination === "document" && !shellFrameNavigation) {
     return Response.redirect(`/app?open=${encodeURIComponent(url.pathname + url.search + url.hash)}`, 302);
   }
   let targetUrl = resolveTargetFromNavionUrl(url);

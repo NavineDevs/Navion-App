@@ -1,6 +1,6 @@
 {
   "name": "navion-app",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Navion App",
   "main": "server.js",
   "type": "module",
@@ -14,6 +14,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "navion": "https://github.com/NavineDevs/Navion/archive/4550a1cfc0e98ff4d0b04f9756126ed5f5142b1b.tar.gz"
+    "navion": "https://github.com/NavineDevs/Navion/archive/c81eb91a9012b5726340d8dfe7da4262ddd1f03c.tar.gz"
   }
 }
