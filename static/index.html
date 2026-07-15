@@ -9,7 +9,31 @@
       window.location.replace("/nav/home");
     }
   </script>
-  <script src="/nv.register.js?v=1.0.24"></script>
+  <script>
+    !function () {
+      if (!navigator.serviceWorker) return;
+      var key = "navion-shell-bootstrap-1.0.24";
+      if (sessionStorage.getItem(key) === "1") return;
+      sessionStorage.setItem(key, "1");
+      Promise.all([
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+          return Promise.all(registrations.map(function (registration) {
+            var worker = registration.active || registration.waiting || registration.installing;
+            var script = worker && worker.scriptURL;
+            return script && new URL(script, location.href).pathname === "/nv.sw.js" ? registration.unregister() : null;
+          }));
+        }),
+        window.caches ? caches.keys().then(function (keys) {
+          return Promise.all(keys.map(function (keyName) {
+            return keyName.indexOf("navion-") === 0 ? caches.delete(keyName) : null;
+          }));
+        }) : Promise.resolve()
+      ]).then(function () {
+        location.reload();
+      }).catch(function () {});
+    }();
+  </script>
+  <script src="/nv.register.js?v=1.0.37"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; font-family: Segoe UI, Arial, sans-serif; background: #0f1220; color: #fff; }
@@ -119,7 +143,6 @@
     <iframe
       id="nvFrame"
       class="nv-view"
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads allow-modals"
       allow="clipboard-read; clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture"
     ></iframe>
   </div>
@@ -292,6 +315,7 @@
           pathname === "/nav/home" ||
           pathname === "/nav/error" ||
           pathname === "/api/fetch" ||
+          pathname === "/api/jikan" ||
           pathname === "/nv.sw.js" ||
           pathname === "/nv.client.js" ||
           pathname === "/nv.register.js" ||
@@ -710,7 +734,6 @@
       var nvLastFrameSetAt = 0;
       var nvLastYouTubeRepairKey = "";
       var nvLastYouTubeRepairAt = 0;
-
       function nvSetFrameSource(src) {
         if (!src) return;
         var current = String(nvFrame.getAttribute("src") || "");
@@ -1006,7 +1029,33 @@
         }
       });
       setInterval(function () { nvGuardFrameNavigation(); }, 2500);
+      function nvForceFrameDarkMode() {
+        try {
+          var doc = nvFrame.contentDocument || (nvFrame.contentWindow && nvFrame.contentWindow.document);
+          if (!doc || !doc.documentElement) return;
+          doc.documentElement.setAttribute("data-theme", "dark");
+          doc.documentElement.setAttribute("data-color-mode", "dark");
+          doc.documentElement.setAttribute("data-bs-theme", "dark");
+          doc.documentElement.classList.add("dark", "theme-dark");
+          doc.documentElement.style.colorScheme = "dark";
+          if (doc.body) {
+            doc.body.setAttribute("data-theme", "dark");
+            doc.body.classList.add("dark", "theme-dark");
+            doc.body.style.colorScheme = "dark";
+          }
+          var style = doc.getElementById("nv-shell-dark-mode");
+          if (!style && doc.head) {
+            style = doc.createElement("style");
+            style.id = "nv-shell-dark-mode";
+            style.textContent = "html,body{color-scheme:dark!important}html:not([style*='background']),body:not([style*='background']){background:#0f0f0f!important}";
+            doc.head.appendChild(style);
+          }
+        } catch (e) {}
+      }
       function nvHandleFrameLoad() {
+        nvForceFrameDarkMode();
+        setTimeout(nvForceFrameDarkMode, 600);
+        setTimeout(nvForceFrameDarkMode, 1800);
         try {
           if (String(nvFrame.contentWindow.location.href || "") === "about:blank") return;
         } catch (blankError) {}

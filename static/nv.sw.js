@@ -2,11 +2,11 @@ const PROXY_ENDPOINT = "/api/fetch";
 let lastChallengeBase = null;
 let lastChallengeBaseAt = 0;
 const NAVION_PREFIX = "/nv/";
-const CACHE_NAME = "navion-app-runtime-v1.0.4";
+const CACHE_NAME = "navion-app-runtime-v1.0.24";
 const RUNTIME_ASSETS = [
   "/nv.sw.js",
-  "/nv.client.js?v=1.0.24",
-  "/nv.register.js?v=1.0.24",
+  "/nv.client.js?v=1.0.37",
+  "/nv.register.js?v=1.0.37",
   "/nav/home",
   "/nav/error",
 ];
@@ -20,6 +20,7 @@ const PASSTHROUGH = new Set([
   "/nv.client.js",
   "/nv.register.js",
   "/api/fetch",
+  "/api/jikan",
   "/api/navion-status",
   "/generate_204",
   "/nav/home",
@@ -91,17 +92,15 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleLocalRequest(request, url) {
-  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.24" :
-    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.24" :
+  const cacheKey = url.pathname === "/nv.client.js" ? "/nv.client.js?v=1.0.37" :
+    url.pathname === "/nv.register.js" ? "/nv.register.js?v=1.0.37" :
     url.pathname;
   if (request.method !== "GET" || !RUNTIME_ASSETS.includes(cacheKey)) {
     return safeFetch(request);
   }
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(cacheKey);
-  if (cached) return cached;
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: "no-store" });
     if (response && response.ok) await cache.put(cacheKey, response.clone());
     return response;
   } catch (err) {
@@ -300,10 +299,6 @@ function normalizeTargetUrl(target) {
   try {
     const targetUrl = new URL(target);
     const host = targetUrl.hostname.toLowerCase();
-    if (host === "m.youtube.com") {
-      targetUrl.hostname = "www.youtube.com";
-      return targetUrl.href;
-    }
     if (
       (host === "duckduckgo.com" || host === "www.duckduckgo.com" || host === "html.duckduckgo.com") &&
       (targetUrl.pathname === "/ai" || targetUrl.pathname.startsWith("/ai/") || targetUrl.searchParams.get("duckai") === "1" || targetUrl.searchParams.get("ia") === "chat" || targetUrl.searchParams.get("iax") === "chat")

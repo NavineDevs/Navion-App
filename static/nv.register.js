@@ -1,5 +1,7 @@
 (function () {
   if (!navigator.serviceWorker) return;
+  var NV_SW_VERSION = "1.0.24";
+  var NV_SW_VERSION_KEY = "navion-sw-version";
 
   function isNavionWorker(registration) {
     try {
@@ -33,6 +35,35 @@
       return registration;
     });
   }
+
+  function resetNavionSw() {
+    try { localStorage.setItem(NV_SW_VERSION_KEY, NV_SW_VERSION); } catch (e) {}
+    return navigator.serviceWorker.getRegistration("/")
+      .then(function (existing) {
+        var clearCaches = window.caches ? caches.keys().then(function (keys) {
+          return Promise.all(keys.map(function (key) {
+            return key.indexOf("navion-") === 0 ? caches.delete(key) : null;
+          }));
+        }).catch(function () {}) : Promise.resolve();
+        return clearCaches.then(function () {
+          if (existing && isNavionWorker(existing)) return existing.unregister().catch(function () {});
+          return null;
+        });
+      })
+      .then(registerNavionSw)
+      .then(function () {
+        if (navigator.serviceWorker.controller) window.location.reload();
+      });
+  }
+
+  try {
+    if (localStorage.getItem(NV_SW_VERSION_KEY) !== NV_SW_VERSION) {
+      resetNavionSw().catch(function (err) {
+        console.error("[Navion] Service Worker reset failed:", err);
+      });
+      return;
+    }
+  } catch (e) {}
 
   navigator.serviceWorker.getRegistration("/")
     .then(function (existing) {

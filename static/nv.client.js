@@ -13,6 +13,7 @@
   var URL_ATTRS = { href: 1, src: 1, action: 1, formaction: 1, poster: 1, "data-src": 1, "data-href": 1, "data-url": 1, "data-original": 1, "data-lazy-src": 1, "data-iframe-src": 1, "data-video": 1, "data-file": 1, "data-stream": 1, "data-source": 1, "data-mp4": 1, "data-webm": 1, "data-hls": 1, "data-m3u8": 1, "data-player": 1, "data-embed": 1, "data-id": 1, "data-link": 1, "data-target": 1 };
   var LOCAL_ALLOW = {
     "/api/fetch": 1,
+    "/api/jikan": 1,
     "/api/navion-status": 1,
     "/favicon.ico": 1,
     "/generate_204": 1,
@@ -151,12 +152,13 @@
       }
       var parsed = new URL(value, window.location.href);
       if (parsed.origin === window.location.origin) {
-        if (!LOCAL_ALLOW[parsed.pathname]) {
-          if (isYouTubeBarePath(parsed.pathname)) {
-            return cfg.rewrite(parsed.pathname + parsed.search + parsed.hash, base || cfg.base || window.location.href);
-          }
-          value = parsed.pathname + parsed.search + parsed.hash;
+        if (LOCAL_ALLOW[parsed.pathname]) {
+          return parsed.pathname + parsed.search + parsed.hash;
         }
+        if (isYouTubeBarePath(parsed.pathname)) {
+          return cfg.rewrite(parsed.pathname + parsed.search + parsed.hash, base || cfg.base || window.location.href);
+        }
+        value = parsed.pathname + parsed.search + parsed.hash;
       } else if (needsProxyHost(parsed.hostname)) {
         return cfg.rewrite(parsed.href, base || cfg.base || window.location.href);
       }
